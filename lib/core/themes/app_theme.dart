@@ -13,7 +13,7 @@ class AppTheme {
     brightness: Brightness.light,
     colorScheme: const ColorScheme.light(
       primary: AppColors.primary,
-      secondary: AppColors.secondary,
+      secondary: AppColors.primary, // Consistent green
       surface: AppColors.white,
       background: AppColors.grey50,
       error: AppColors.error,
@@ -26,7 +26,7 @@ class AppTheme {
     
     fontFamily: 'Poppins',
     
-    // App Bar Theme
+    // App Bar Theme - Green
     appBarTheme: const AppBarTheme(
       backgroundColor: AppColors.primary,
       foregroundColor: AppColors.white,
@@ -39,7 +39,7 @@ class AppTheme {
       ),
     ),
     
-    // Bottom Navigation Bar Theme
+    // Bottom Navigation Bar Theme - Green
     bottomNavigationBarTheme: const BottomNavigationBarThemeData(
       backgroundColor: AppColors.white,
       selectedItemColor: AppColors.primary,
@@ -48,7 +48,7 @@ class AppTheme {
       elevation: 8,
     ),
     
-    // Button Themes
+    // Button Themes - All Green
     elevatedButtonTheme: ElevatedButtonThemeData(
       style: ElevatedButton.styleFrom(
         backgroundColor: AppColors.primary,
@@ -93,7 +93,7 @@ class AppTheme {
       ),
     ),
     
-    // Input Decoration Theme
+    // Input Decoration Theme - Green Focus
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
       fillColor: AppColors.grey100,
@@ -124,7 +124,7 @@ class AppTheme {
       suffixIconColor: AppColors.grey500,
     ),
     
-    // Card Theme
+    // Card Theme - Green Accents
     cardTheme: CardTheme(
       elevation: 2,
       shape: RoundedRectangleBorder(
@@ -134,7 +134,7 @@ class AppTheme {
       margin: const EdgeInsets.all(0),
     ),
     
-    // Dialog Theme
+    // Dialog Theme - Green
     dialogTheme: DialogTheme(
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
@@ -159,13 +159,13 @@ class AppTheme {
       clipBehavior: Clip.antiAlias,
     ),
     
-    // Snackbar Theme
+    // Snackbar Theme - Green
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
       ),
-      backgroundColor: AppColors.grey900,
+      backgroundColor: AppColors.primary,
       contentTextStyle: const TextStyle(
         fontSize: 14,
         color: AppColors.white,
@@ -179,7 +179,7 @@ class AppTheme {
       space: 1,
     ),
     
-    // Progress Indicator Theme
+    // Progress Indicator Theme - Green
     progressIndicatorTheme: const ProgressIndicatorThemeData(
       color: AppColors.primary,
       circularTrackColor: AppColors.grey200,
@@ -200,7 +200,7 @@ class AppTheme {
     brightness: Brightness.dark,
     colorScheme: const ColorScheme.dark(
       primary: AppColors.primary,
-      secondary: AppColors.secondary,
+      secondary: AppColors.primary,
       surface: AppColors.grey900,
       background: AppColors.black,
       error: AppColors.error,
@@ -213,10 +213,23 @@ class AppTheme {
     fontFamily: 'Poppins',
     
     appBarTheme: const AppBarTheme(
-      backgroundColor: AppColors.grey900,
+      backgroundColor: AppColors.primary,
       foregroundColor: AppColors.white,
       elevation: 0,
       centerTitle: true,
+      titleTextStyle: TextStyle(
+        fontSize: 20,
+        fontWeight: FontWeight.w600,
+        color: AppColors.white,
+      ),
+    ),
+    
+    bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+      backgroundColor: AppColors.grey900,
+      selectedItemColor: AppColors.primary,
+      unselectedItemColor: AppColors.grey500,
+      type: BottomNavigationBarType.fixed,
+      elevation: 8,
     ),
     
     elevatedButtonTheme: ElevatedButtonThemeData(
@@ -254,6 +267,23 @@ class AppTheme {
         borderSide: const BorderSide(color: AppColors.primary, width: 1.5),
       ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+    ),
+    
+    snackBarTheme: SnackBarThemeData(
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+      ),
+      backgroundColor: AppColors.primary,
+      contentTextStyle: const TextStyle(
+        fontSize: 14,
+        color: AppColors.white,
+      ),
+    ),
+    
+    progressIndicatorTheme: const ProgressIndicatorThemeData(
+      color: AppColors.primary,
+      circularTrackColor: AppColors.grey700,
     ),
   );
 }

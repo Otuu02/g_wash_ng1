@@ -1,5 +1,6 @@
 // lib/presentation/screens/customer/home_screen.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // Add this for Clipboard
 import 'package:provider/provider.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../services/auth_service.dart';
@@ -24,11 +25,11 @@ class _HomeScreenState extends State<HomeScreen> {
   String _selectedLocation = 'Lekki Phase 1, Lagos';
   int _selectedCategoryIndex = 0; // 0=Car Wash, 1=House Cleaning, 2=Laundry
   
-  // Service Categories
+  // Service Categories - All using consistent green
   final List<Map<String, dynamic>> _categories = [
-    {'name': 'Car Wash', 'icon': Icons.local_car_wash, 'color': const Color(0xFF0CAF60)},
-    {'name': 'House Cleaning', 'icon': Icons.home, 'color': Colors.blue},
-    {'name': 'Laundry', 'icon': Icons.local_laundry_service, 'color': Colors.purple},
+    {'name': 'Car Wash', 'icon': Icons.local_car_wash, 'color': AppColors.primary},
+    {'name': 'House Cleaning', 'icon': Icons.cleaning_services, 'color': AppColors.primary},
+    {'name': 'Laundry', 'icon': Icons.local_laundry_service, 'color': AppColors.primary},
   ];
   
   // Car Wash Services
@@ -87,12 +88,12 @@ class _HomeScreenState extends State<HomeScreen> {
             const Text('Confirm Service', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
             const SizedBox(height: 16),
             ListTile(
-              leading: Icon(service['icon'], color: _currentCategoryColor, size: 40),
+              leading: Icon(service['icon'], color: AppColors.primary, size: 40),
               title: Text(service['name'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
               subtitle: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Price: ${service['priceDisplay']}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
+                  Text('Price: ${service['priceDisplay']}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500, color: AppColors.primary)),
                   Text('Duration: ${service['duration']}', style: const TextStyle(color: Colors.grey)),
                   if (service.containsKey('weight'))
                     Text('Weight: ${service['weight']}', style: const TextStyle(color: Colors.grey, fontSize: 12)),
@@ -105,7 +106,7 @@ class _HomeScreenState extends State<HomeScreen> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: AppColors.primaryBackground,
+                color: AppColors.primary.withOpacity(0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
@@ -143,7 +144,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       );
                     },
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: _currentCategoryColor,
+                      backgroundColor: AppColors.primary,
                     ),
                     child: const Text('Continue'),
                   ),
@@ -203,28 +204,165 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // ==================== REFERRAL METHODS ====================
+  
+  void _showReferralDialog() {
+    final String referralCode = 'GWASH${DateTime.now().year}';
+    
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          'Refer & Earn Rewards! 🎉',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Share your referral code with friends and family!',
+              style: TextStyle(fontSize: 14),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppColors.primary.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.primary.withOpacity(0.2)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.code, color: AppColors.primary),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Referral Code: $referralCode',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            const Text(
+              'How it works:',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            _buildReferralStep(Icons.person_add, 'Share your code with friends'),
+            _buildReferralStep(Icons.emoji_events, 'Get ₦1,000 when they book'),
+            _buildReferralStep(Icons.money, 'Your friend gets ₦500 off'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text(
+              'Close',
+              style: TextStyle(color: AppColors.primary),
+            ),
+          ),
+          ElevatedButton.icon(
+            onPressed: () => _shareReferralCode(referralCode),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            icon: const Icon(Icons.share, size: 18),
+            label: const Text('Share Now'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReferralStep(IconData icon, String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          Icon(icon, color: AppColors.primary, size: 18),
+          const SizedBox(width: 8),
+          Expanded(child: Text(text, style: const TextStyle(fontSize: 13))),
+        ],
+      ),
+    );
+  }
+
+  void _shareReferralCode(String code) {
+    final String shareText = 
+      '🎉 Join me on G Wash NG!\n\n'
+      'Use my referral code: $code\n'
+      'Get ₦500 off your first booking!\n\n'
+      'Download the app now and enjoy professional car wash, house cleaning, and laundry services at your doorstep.\n'
+      'https://gwashng.com/download';
+    
+    // Close the dialog
+    Navigator.pop(context);
+    
+    // Copy to clipboard
+    Clipboard.setData(ClipboardData(text: shareText));
+    
+    // Show success message
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              '✅ Referral code copied!',
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            Text(
+              'Share: $code',
+              style: const TextStyle(fontSize: 12),
+            ),
+          ],
+        ),
+        backgroundColor: AppColors.primary,
+        duration: const Duration(seconds: 4),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        action: SnackBarAction(
+          label: 'OK',
+          textColor: Colors.white,
+          onPressed: () {},
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final authService = Provider.of<AuthService>(context);
     final userName = authService.userName ?? 'Guest';
 
     return Scaffold(
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.white,
       appBar: AppBar(
         title: const Text(
           'G Wash NG',
-          style: TextStyle(color: Color(0xFF0CAF60), fontWeight: FontWeight.bold, fontSize: 20),
+          style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold, fontSize: 20),
         ),
-        backgroundColor: Colors.white,
+        backgroundColor: AppColors.white,
         elevation: 0,
         centerTitle: false,
         actions: [
           IconButton(
-            icon: const Icon(Icons.notifications_outlined, color: Color(0xFF0CAF60)),
+            icon: const Icon(Icons.notifications_outlined, color: AppColors.primary),
             onPressed: _goToNotifications,
           ),
           PopupMenuButton<String>(
-            icon: const Icon(Icons.more_vert, color: Color(0xFF0CAF60)),
+            icon: const Icon(Icons.more_vert, color: AppColors.primary),
             onSelected: (value) {
               switch (value) {
                 case 'become_washer':
@@ -243,7 +381,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 value: 'become_washer',
                 child: Row(
                   children: [
-                    Icon(Icons.emoji_transportation, color: Color(0xFF0CAF60), size: 22),
+                    Icon(Icons.emoji_transportation, color: AppColors.primary, size: 22),
                     SizedBox(width: 12),
                     Text('Become a Partner', style: TextStyle(fontWeight: FontWeight.w500)),
                   ],
@@ -254,7 +392,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 value: 'help',
                 child: Row(
                   children: [
-                    Icon(Icons.help_outline, color: Color(0xFF0CAF60), size: 22),
+                    Icon(Icons.help_outline, color: AppColors.primary, size: 22),
                     SizedBox(width: 12),
                     Text('Help & Support', style: TextStyle(fontWeight: FontWeight.w500)),
                   ],
@@ -264,7 +402,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 value: 'settings',
                 child: Row(
                   children: [
-                    Icon(Icons.settings, color: Color(0xFF0CAF60), size: 22),
+                    Icon(Icons.settings, color: AppColors.primary, size: 22),
                     SizedBox(width: 12),
                     Text('Settings', style: TextStyle(fontWeight: FontWeight.w500)),
                   ],
@@ -286,7 +424,7 @@ class _HomeScreenState extends State<HomeScreen> {
         currentIndex: _currentIndex,
         onTap: (index) => setState(() => _currentIndex = index),
         type: BottomNavigationBarType.fixed,
-        selectedItemColor: const Color(0xFF0CAF60),
+        selectedItemColor: AppColors.primary,
         unselectedItemColor: Colors.grey,
         items: const [
           BottomNavigationBarItem(
@@ -314,12 +452,12 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header with Gradient
+          // Header with Gradient - Consistent Green
           Container(
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 30),
             decoration: const BoxDecoration(
               gradient: LinearGradient(
-                colors: [Color(0xFF0CAF60), Color(0xFF0A8E4F)],
+                colors: [AppColors.primary, AppColors.primaryDark],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
@@ -369,7 +507,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.location_on, color: Color(0xFF0CAF60), size: 20),
+                        const Icon(Icons.location_on, color: AppColors.primary, size: 20),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
@@ -381,10 +519,10 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                         const Text(
                           'Change',
-                          style: TextStyle(color: Color(0xFF0CAF60), fontWeight: FontWeight.w500),
+                          style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w500),
                         ),
                         const SizedBox(width: 4),
-                        const Icon(Icons.arrow_drop_down, color: Color(0xFF0CAF60), size: 20),
+                        const Icon(Icons.arrow_drop_down, color: AppColors.primary, size: 20),
                       ],
                     ),
                   ),
@@ -394,7 +532,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 24),
 
-          // Category Tabs
+          // Category Tabs - All Green
           Container(
             margin: const EdgeInsets.symmetric(horizontal: 20),
             child: Row(
@@ -408,7 +546,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       margin: const EdgeInsets.symmetric(horizontal: 4),
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       decoration: BoxDecoration(
-                        color: isSelected ? category['color'] : Colors.grey.shade100,
+                        color: isSelected ? AppColors.primary : Colors.grey.shade100,
                         borderRadius: BorderRadius.circular(30),
                       ),
                       child: Row(
@@ -417,13 +555,13 @@ class _HomeScreenState extends State<HomeScreen> {
                           Icon(
                             category['icon'],
                             size: 18,
-                            color: isSelected ? Colors.white : category['color'],
+                            color: isSelected ? Colors.white : AppColors.primary,
                           ),
                           const SizedBox(width: 6),
                           Text(
                             category['name'],
                             style: TextStyle(
-                              color: isSelected ? Colors.white : category['color'],
+                              color: isSelected ? Colors.white : AppColors.primary,
                               fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                               fontSize: 13,
                             ),
@@ -438,13 +576,13 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 24),
 
-          // Promo Banner
+          // Promo Banner - Consistent Green
           Container(
             margin: const EdgeInsets.symmetric(horizontal: 20),
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [_currentCategoryColor, _currentCategoryColor.withOpacity(0.7)],
+              gradient: const LinearGradient(
+                colors: [AppColors.primary, AppColors.primaryDark],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
@@ -489,7 +627,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.white,
-                          foregroundColor: _currentCategoryColor,
+                          foregroundColor: AppColors.primary,
                           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
                         ),
@@ -524,14 +662,14 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 TextButton(
                   onPressed: () {},
-                  child: const Text('See all', style: TextStyle(color: Color(0xFF0CAF60))),
+                  child: const Text('See all', style: TextStyle(color: AppColors.primary)),
                 ),
               ],
             ),
           ),
           const SizedBox(height: 16),
           
-          // Service Cards - Horizontal Scroll
+          // Service Cards - All Green
           SizedBox(
             height: 150,
             child: ListView.builder(
@@ -547,14 +685,14 @@ class _HomeScreenState extends State<HomeScreen> {
                     margin: const EdgeInsets.only(right: 12),
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: _currentCategoryColor.withOpacity(0.1),
+                      color: AppColors.primary.withOpacity(0.08),
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: _currentCategoryColor.withOpacity(0.2)),
+                      border: Border.all(color: AppColors.primary.withOpacity(0.2)),
                     ),
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(service['icon'], size: 35, color: _currentCategoryColor),
+                        Icon(service['icon'], size: 35, color: AppColors.primary),
                         const SizedBox(height: 8),
                         Text(
                           service['name'],
@@ -566,7 +704,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         const SizedBox(height: 4),
                         Text(
                           service['priceDisplay'],
-                          style: TextStyle(fontWeight: FontWeight.bold, color: _currentCategoryColor, fontSize: 14),
+                          style: TextStyle(fontWeight: FontWeight.bold, color: AppColors.primary, fontSize: 14),
                         ),
                         const SizedBox(height: 2),
                         Text(
@@ -582,13 +720,14 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SizedBox(height: 24),
 
-          // Why Choose Us Section
+          // Why Choose Us Section - Green Accents
           Container(
             margin: const EdgeInsets.symmetric(horizontal: 20),
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: Colors.grey.shade50,
+              color: AppColors.primary.withOpacity(0.05),
               borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: AppColors.primary.withOpacity(0.1)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -607,13 +746,13 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           
-          // Refer & Earn Banner
+          // Refer & Earn Banner - With Working Invite Feature
           const SizedBox(height: 16),
           Container(
             margin: const EdgeInsets.symmetric(horizontal: 20),
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              gradient: const LinearGradient(colors: [Color(0xFF0CAF60), Color(0xFF0A8E4F)]),
+              gradient: const LinearGradient(colors: [AppColors.primary, AppColors.primaryDark]),
               borderRadius: BorderRadius.circular(16),
             ),
             child: Row(
@@ -633,15 +772,18 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ],
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(30),
-                  ),
-                  child: const Text(
-                    'Invite',
-                    style: TextStyle(color: Color(0xFF0CAF60), fontWeight: FontWeight.bold),
+                GestureDetector(
+                  onTap: _showReferralDialog,  // Now this works!
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(30),
+                    ),
+                    child: const Text(
+                      'Invite',
+                      style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold),
+                    ),
                   ),
                 ),
               ],
@@ -678,10 +820,10 @@ class _HomeScreenState extends State<HomeScreen> {
         Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: const Color(0xFF0CAF60).withOpacity(0.1),
+            color: AppColors.primary.withOpacity(0.1),
             borderRadius: BorderRadius.circular(12),
           ),
-          child: Icon(icon, color: const Color(0xFF0CAF60), size: 22),
+          child: Icon(icon, color: AppColors.primary, size: 22),
         ),
         const SizedBox(width: 14),
         Expanded(

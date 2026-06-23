@@ -1,5 +1,5 @@
 // FILE: lib/presentation/screens/customer/payment_methods_screen.dart
-// PURPOSE: Manage payment methods - FULLY WORKING
+// PURPOSE: Manage payment methods - FULLY WORKING with consistent green theme
 
 import 'package:flutter/material.dart';
 import '../../../core/constants/app_colors.dart';
@@ -72,10 +72,14 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
       builder: (context) => AlertDialog(
         title: const Text('Remove Card'),
         content: const Text('Are you sure you want to remove this card?'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: AppColors.primary),
+            ),
           ),
           ElevatedButton(
             onPressed: () {
@@ -85,7 +89,11 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
               Navigator.pop(context);
               Helpers.showSnackBar(context, message: 'Card removed', isSuccess: true);
             },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.error,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
             child: const Text('Remove'),
           ),
         ],
@@ -96,117 +104,177 @@ class _PaymentMethodsScreenState extends State<PaymentMethodsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppColors.white,
       appBar: AppBar(
-        title: const Text('Payment Methods'),
+        title: const Text(
+          'Payment Methods',
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        ),
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
+        elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.add),
+            icon: const Icon(Icons.add, color: Colors.white),
             onPressed: _addPaymentMethod,
           ),
         ],
       ),
       body: _paymentMethods.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.credit_card_off, size: 80, color: AppColors.grey400),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'No payment methods',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Add your first card',
-                    style: TextStyle(color: AppColors.grey600),
-                  ),
-                  const SizedBox(height: 24),
-                  ElevatedButton(
-                    onPressed: _addPaymentMethod,
-                    child: const Text('Add Card'),
-                  ),
-                ],
-              ),
-            )
+          ? _buildEmptyState()
           : ListView.builder(
               padding: const EdgeInsets.all(16),
               itemCount: _paymentMethods.length,
               itemBuilder: (context, index) {
                 final method = _paymentMethods[index];
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  child: ListTile(
-                    leading: Container(
-                      width: 50,
-                      height: 35,
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: AppColors.grey300),
-                      ),
-                      child: Center(
-                        child: Text(
-                          method['name'],
-                          style: TextStyle(
-                            fontWeight: FontWeight.bold,
-                            color: method['type'] == 'visa' ? Colors.blue : Colors.orange,
-                          ),
-                        ),
-                      ),
-                    ),
-                    title: Row(
-                      children: [
-                        Text('•••• ${method['last4']}'),
-                        if (method['isDefault']) ...[
-                          const SizedBox(width: 8),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: AppColors.primaryBackground,
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: const Text(
-                              'Default',
-                              style: TextStyle(fontSize: 10, color: AppColors.primary),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                    subtitle: Text('Expires ${method['expiry']}'),
-                    trailing: PopupMenuButton(
-                      icon: const Icon(Icons.more_vert),
-                      itemBuilder: (context) => [
-                        if (!method['isDefault'])
-                          const PopupMenuItem(
-                            value: 'default',
-                            child: Text('Set as Default'),
-                          ),
-                        const PopupMenuItem(
-                          value: 'remove',
-                          child: Text('Remove', style: TextStyle(color: AppColors.error)),
-                        ),
-                      ],
-                      onSelected: (value) {
-                        if (value == 'default') {
-                          _setDefaultPayment(method['id']);
-                        } else if (value == 'remove') {
-                          _removePayment(method['id']);
-                        }
-                      },
-                    ),
-                  ),
-                );
+                return _buildPaymentCard(method);
               },
             ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.credit_card_off, size: 80, color: AppColors.grey400),
+          const SizedBox(height: 16),
+          const Text(
+            'No payment methods',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Add your first card',
+            style: TextStyle(color: AppColors.grey600),
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton(
+            onPressed: _addPaymentMethod,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
+            ),
+            child: const Text('Add Card', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPaymentCard(Map<String, dynamic> method) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: method['isDefault'] ? AppColors.primary : AppColors.grey200,
+          width: method['isDefault'] ? 2 : 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.shade100,
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        leading: Container(
+          width: 50,
+          height: 35,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: AppColors.grey300),
+          ),
+          child: Center(
+            child: Text(
+              method['type'] == 'visa' ? 'VISA' : 'MC',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+                color: method['type'] == 'visa' ? Colors.blue : Colors.orange,
+              ),
+            ),
+          ),
+        ),
+        title: Row(
+          children: [
+            Text(
+              '•••• ${method['last4']}',
+              style: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            if (method['isDefault']) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Text(
+                  'Default',
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+        subtitle: Text(
+          'Expires ${method['expiry']}',
+          style: const TextStyle(fontSize: 13),
+        ),
+        trailing: PopupMenuButton(
+          icon: const Icon(Icons.more_vert, color: AppColors.primary),
+          itemBuilder: (context) => [
+            if (!method['isDefault'])
+              const PopupMenuItem(
+                value: 'default',
+                child: Row(
+                  children: [
+                    Icon(Icons.check_circle, color: AppColors.primary, size: 20),
+                    SizedBox(width: 12),
+                    Text('Set as Default'),
+                  ],
+                ),
+              ),
+            const PopupMenuItem(
+              value: 'remove',
+              child: Row(
+                children: [
+                  Icon(Icons.delete_outline, color: AppColors.error, size: 20),
+                  SizedBox(width: 12),
+                  Text('Remove', style: TextStyle(color: AppColors.error)),
+                ],
+              ),
+            ),
+          ],
+          onSelected: (value) {
+            if (value == 'default') {
+              _setDefaultPayment(method['id']);
+            } else if (value == 'remove') {
+              _removePayment(method['id']);
+            }
+          },
+        ),
+      ),
     );
   }
 }
@@ -228,7 +296,7 @@ class _AddCardBottomSheetState extends State<AddCardBottomSheet> {
   String _cardType = 'visa';
 
   void _submit() {
-    if (_cardNumber.text.length < 15) {
+    if (_cardNumber.text.replaceAll(' ', '').length < 15) {
       Helpers.showSnackBar(context, message: 'Enter valid card number', isError: true);
       return;
     }
@@ -245,11 +313,11 @@ class _AddCardBottomSheetState extends State<AddCardBottomSheet> {
       return;
     }
 
-    final last4 = _cardNumber.text.substring(_cardNumber.text.length - 4);
+    final last4 = _cardNumber.text.replaceAll(' ', '');
     widget.onAdd({
       'type': _cardType,
       'name': _cardType == 'visa' ? 'VISA' : 'Mastercard',
-      'last4': last4,
+      'last4': last4.substring(last4.length - 4),
       'expiry': _expiry.text,
     });
     Navigator.pop(context);
@@ -258,17 +326,33 @@ class _AddCardBottomSheetState extends State<AddCardBottomSheet> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(24),
       decoration: const BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Add Card', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          Center(
+            child: Container(
+              width: 60,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.grey300,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+          ),
           const SizedBox(height: 16),
-          // Card Type Selector
+          const Text(
+            'Add Card',
+            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 20),
+
+          // Card Type Selector - Green
           Row(
             children: [
               Expanded(
@@ -277,6 +361,11 @@ class _AddCardBottomSheetState extends State<AddCardBottomSheet> {
                   selected: _cardType == 'visa',
                   onSelected: (selected) => setState(() => _cardType = 'visa'),
                   selectedColor: AppColors.primary,
+                  labelStyle: TextStyle(
+                    color: _cardType == 'visa' ? Colors.white : Colors.black87,
+                    fontWeight: _cardType == 'visa' ? FontWeight.bold : FontWeight.normal,
+                  ),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                 ),
               ),
               const SizedBox(width: 12),
@@ -286,22 +375,51 @@ class _AddCardBottomSheetState extends State<AddCardBottomSheet> {
                   selected: _cardType == 'mastercard',
                   onSelected: (selected) => setState(() => _cardType = 'mastercard'),
                   selectedColor: AppColors.primary,
+                  labelStyle: TextStyle(
+                    color: _cardType == 'mastercard' ? Colors.white : Colors.black87,
+                    fontWeight: _cardType == 'mastercard' ? FontWeight.bold : FontWeight.normal,
+                  ),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
+
+          // Card Number - Green Focus
           TextField(
             controller: _cardNumber,
             decoration: const InputDecoration(
               labelText: 'Card Number',
-              prefixIcon: Icon(Icons.credit_card),
+              prefixIcon: Icon(Icons.credit_card, color: AppColors.primary),
+              hintText: '1234 5678 9012 3456',
               border: OutlineInputBorder(),
+              focusedBorder: OutlineInputBorder(
+                borderSide: BorderSide(color: AppColors.primary, width: 2),
+              ),
             ),
-            keyboardType: TextInputType.number,  // FIXED: Changed from TextInputTypes.number
+            keyboardType: TextInputType.number,
             maxLength: 19,
+            onChanged: (value) {
+              // Auto-format card number
+              final text = value.replaceAll(' ', '');
+              if (text.length > 4) {
+                final formatted = StringBuffer();
+                for (int i = 0; i < text.length; i++) {
+                  if (i > 0 && i % 4 == 0) formatted.write(' ');
+                  formatted.write(text[i]);
+                }
+                _cardNumber.value = TextEditingValue(
+                  text: formatted.toString(),
+                  selection: TextSelection.collapsed(offset: formatted.length),
+                );
+              }
+            },
           ),
+
           const SizedBox(height: 12),
+
+          // Expiry and CVV - Green Focus
           Row(
             children: [
               Expanded(
@@ -309,10 +427,25 @@ class _AddCardBottomSheetState extends State<AddCardBottomSheet> {
                   controller: _expiry,
                   decoration: const InputDecoration(
                     labelText: 'Expiry (MM/YY)',
-                    prefixIcon: Icon(Icons.date_range),
+                    prefixIcon: Icon(Icons.date_range, color: AppColors.primary),
+                    hintText: 'MM/YY',
                     border: OutlineInputBorder(),
+                    focusedBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: AppColors.primary, width: 2),
+                    ),
                   ),
                   keyboardType: TextInputType.datetime,
+                  onChanged: (value) {
+                    // Auto-format expiry
+                    final text = value.replaceAll('/', '');
+                    if (text.length >= 2) {
+                      final formatted = '${text.substring(0, 2)}/${text.substring(2)}';
+                      _expiry.value = TextEditingValue(
+                        text: formatted,
+                        selection: TextSelection.collapsed(offset: formatted.length),
+                      );
+                    }
+                  },
                 ),
               ),
               const SizedBox(width: 12),
@@ -321,32 +454,60 @@ class _AddCardBottomSheetState extends State<AddCardBottomSheet> {
                   controller: _cvv,
                   decoration: const InputDecoration(
                     labelText: 'CVV',
-                    prefixIcon: Icon(Icons.lock),
+                    prefixIcon: Icon(Icons.lock, color: AppColors.primary),
+                    hintText: '***',
                     border: OutlineInputBorder(),
+                    focusedBorder: OutlineInputBorder(
+                      borderSide: BorderSide(color: AppColors.primary, width: 2),
+                    ),
                   ),
                   keyboardType: TextInputType.number,
                   obscureText: true,
+                  maxLength: 4,
                 ),
               ),
             ],
           ),
+
           const SizedBox(height: 12),
+
+          // Cardholder Name - Green Focus
           TextField(
             controller: _cardholderName,
             decoration: const InputDecoration(
               labelText: 'Cardholder Name',
-              prefixIcon: Icon(Icons.person),
+              prefixIcon: Icon(Icons.person, color: AppColors.primary),
+              hintText: 'John Doe',
               border: OutlineInputBorder(),
+              focusedBorder: OutlineInputBorder(
+                borderSide: BorderSide(color: AppColors.primary, width: 2),
+              ),
             ),
           ),
-          const SizedBox(height: 20),
+
+          const SizedBox(height: 24),
+
+          // Add Card Button - Green
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
               onPressed: _submit,
-              child: const Text('Add Card'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                elevation: 0,
+              ),
+              child: const Text(
+                'Add Card',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
             ),
           ),
+          const SizedBox(height: 12),
         ],
       ),
     );

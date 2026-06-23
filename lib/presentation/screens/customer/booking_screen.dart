@@ -1,13 +1,8 @@
-import 'dart:math';
+// lib/presentation/screens/customer/booking_screen.dart
 import 'package:flutter/material.dart';
-import 'package:geolocator/geolocator.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:intl/intl.dart';
 import '../../../core/constants/app_colors.dart';
-import '../../../services/job_service.dart';
-import '../../../services/permission_service.dart';
-import 'location_search_screen.dart';
-import 'tracking_screen.dart';
+import 'payment_screen.dart';
 
 class BookingScreen extends StatefulWidget {
   final String? selectedService;
@@ -28,374 +23,585 @@ class BookingScreen extends StatefulWidget {
 }
 
 class _BookingScreenState extends State<BookingScreen> {
-  String _selectedService = 'Exterior Wash';
   String _selectedCategory = 'Car Wash';
+  String _selectedService = 'Standard Cleaning';
+  int _selectedServicePrice = 15000;
   String _selectedLocation = 'Lekki Phase 1, Lagos';
   DateTime _selectedDate = DateTime.now();
-  String _selectedTimeSlot = '10:30 AM';
-  String _selectedPayment = 'Paystack';
-  bool _isProcessing = false;
-  bool _hasLocationPermission = false;
-  
-  final Map<String, Map<String, dynamic>> _carWashServices = {
-    'Exterior Wash': {'price': 3000, 'duration': '30 mins', 'icon': Icons.cleaning_services, 'priceDisplay': '₦3,000', 'description': 'Professional exterior wash including foam, rinse, and dry'},
-    'Interior Cleaning': {'price': 5000, 'duration': '45 mins', 'icon': Icons.event_seat, 'priceDisplay': '₦5,000', 'description': 'Complete interior vacuum, dashboard cleaning, and glass polishing'},
-    'Full Detailing': {'price': 10000, 'duration': '90 mins', 'icon': Icons.star, 'priceDisplay': '₦10,000', 'description': 'Comprehensive exterior + interior detailing for showroom finish'},
-    'Engine Wash': {'price': 7000, 'duration': '60 mins', 'icon': Icons.settings, 'priceDisplay': '₦7,000', 'description': 'Professional engine bay cleaning and degreasing'},
-  };
-  
-  final Map<String, Map<String, dynamic>> _houseCleaningServices = {
-    'Standard Cleaning': {'price': 15000, 'duration': '3 hours', 'icon': Icons.cleaning_services, 'priceDisplay': '₦15,000', 'description': 'Basic cleaning for 2-3 bedroom apartments', 'bedrooms': '2-3 beds'},
-    'Deep Cleaning': {'price': 25000, 'duration': '5 hours', 'icon': Icons.brush, 'priceDisplay': '₦25,000', 'description': 'Deep cleaning for 3-4 bedroom homes', 'bedrooms': '3-4 beds'},
-    'Move In/Out': {'price': 35000, 'duration': '6 hours', 'icon': Icons.move_to_inbox, 'priceDisplay': '₦35,000', 'description': 'Complete cleaning for moving in/out', 'bedrooms': '4-5 beds'},
-    'Office Cleaning': {'price': 20000, 'duration': '4 hours', 'icon': Icons.business, 'priceDisplay': '₦20,000', 'description': 'Professional office space cleaning', 'size': 'Small office'},
-    'Carpet Cleaning': {'price': 8000, 'duration': '2 hours', 'icon': Icons.carpenter, 'priceDisplay': '₦8,000', 'description': 'Deep carpet steam cleaning', 'rooms': 'Per room'},
-    'Window Cleaning': {'price': 5000, 'duration': '1.5 hours', 'icon': Icons.window, 'priceDisplay': '₦5,000', 'description': 'Interior and exterior window cleaning', 'floors': 'Per floor'},
-  };
-  
-  final Map<String, Map<String, dynamic>> _laundryServices = {
-    'Wash & Fold': {'price': 2000, 'duration': '24 hours', 'icon': Icons.local_laundry_service, 'priceDisplay': '₦2,000', 'description': 'Wash, dry, and fold service', 'weight': 'Up to 5kg'},
-    'Wash & Iron': {'price': 3500, 'duration': '24 hours', 'icon': Icons.iron, 'priceDisplay': '₦3,500', 'description': 'Wash, dry, and professional ironing', 'weight': 'Up to 5kg'},
-    'Dry Cleaning': {'price': 5000, 'duration': '48 hours', 'icon': Icons.dry, 'priceDisplay': '₦5,000', 'description': 'Professional dry cleaning', 'items': 'Up to 3 items'},
-    'Ironing Only': {'price': 1500, 'duration': '12 hours', 'icon': Icons.iron, 'priceDisplay': '₦1,500', 'description': 'Professional ironing service only', 'weight': 'Up to 3kg'},
-    'Bulk Laundry': {'price': 10000, 'duration': '48 hours', 'icon': Icons.local_laundry_service, 'priceDisplay': '₦10,000', 'description': 'Large quantity laundry', 'weight': '15-20kg'},
-    'Curtain Cleaning': {'price': 7000, 'duration': '72 hours', 'icon': Icons.curtains, 'priceDisplay': '₦7,000', 'description': 'Professional curtain cleaning', 'items': 'Per set'},
+  String _selectedTime = '9:00 AM';
+  String _selectedPaymentMethod = 'Wallet';
+  int _currentStep = 0;
+
+  final List<String> _categories = ['Car Wash', 'House Cleaning', 'Laundry'];
+
+  // Service Data
+  final Map<String, List<Map<String, dynamic>>> _services = {
+    'Car Wash': [
+      {'name': 'Exterior Wash', 'price': 3000, 'duration': '30 mins', 'description': 'Wash and dry exterior'},
+      {'name': 'Interior Cleaning', 'price': 5000, 'duration': '45 mins', 'description': 'Vacuum and wipe interior'},
+      {'name': 'Full Detailing', 'price': 10000, 'duration': '90 mins', 'description': 'Complete wash and detailing'},
+      {'name': 'Engine Wash', 'price': 7000, 'duration': '60 mins', 'description': 'Engine bay cleaning'},
+    ],
+    'House Cleaning': [
+      {'name': 'Standard Cleaning', 'price': 15000, 'duration': '3 hours', 'description': 'Basic cleaning for 2-3 bedroom apartments'},
+      {'name': 'Deep Cleaning', 'price': 25000, 'duration': '5 hours', 'description': 'Deep clean for 3-4 bedroom apartments'},
+      {'name': 'Move In/Out', 'price': 35000, 'duration': '6 hours', 'description': 'Full move in/out cleaning'},
+      {'name': 'Office Cleaning', 'price': 20000, 'duration': '4 hours', 'description': 'Professional office cleaning'},
+    ],
+    'Laundry': [
+      {'name': 'Wash & Fold', 'price': 2000, 'duration': '24 hours', 'description': 'Wash, dry, and fold service'},
+      {'name': 'Wash & Iron', 'price': 3500, 'duration': '24 hours', 'description': 'Wash, dry, and iron service'},
+      {'name': 'Dry Cleaning', 'price': 5000, 'duration': '48 hours', 'description': 'Professional dry cleaning'},
+      {'name': 'Ironing Only', 'price': 1500, 'duration': '12 hours', 'description': 'Ironing service only'},
+    ],
   };
 
-  final List<String> _timeSlots = ['9:00 AM', '10:30 AM', '12:00 PM', '1:30 PM', '3:00 PM', '4:30 PM', '6:00 PM'];
-  
-  final List<Map<String, dynamic>> _categories = [
-    {'name': 'Car Wash', 'icon': Icons.local_car_wash, 'color': const Color(0xFF0CAF60)},
-    {'name': 'House Cleaning', 'icon': Icons.home, 'color': Colors.blue},
-    {'name': 'Laundry', 'icon': Icons.local_laundry_service, 'color': Colors.purple},
+  final List<String> _timeSlots = [
+    '9:00 AM', '10:30 AM', '12:00 PM', '1:30 PM', '3:00 PM', '4:30 PM', '6:00 PM'
   ];
 
-  Map<String, Map<String, dynamic>> get _currentServices {
-    switch (_selectedCategory) {
-      case 'House Cleaning':
-        return _houseCleaningServices;
-      case 'Laundry':
-        return _laundryServices;
-      default:
-        return _carWashServices;
-    }
-  }
-
-  Map<String, dynamic> get _currentService => _currentServices[_selectedService]!;
-  int get _selectedPrice => _currentService['price'];
-  String get _selectedPriceDisplay => _currentService['priceDisplay'];
-  Color get _currentCategoryColor {
-    switch (_selectedCategory) {
-      case 'House Cleaning':
-        return Colors.blue;
-      case 'Laundry':
-        return Colors.purple;
-      default:
-        return AppColors.primary;
-    }
-  }
+  final List<String> _paymentMethods = ['Wallet', 'Card', 'Bank Transfer', 'Pay on Delivery'];
 
   @override
   void initState() {
     super.initState();
-    _initializeSelections();
-    _checkLocationPermission();
-  }
-
-  void _initializeSelections() {
+    if (widget.selectedService != null) {
+      _selectedService = widget.selectedService!;
+    }
+    if (widget.selectedPrice != null) {
+      _selectedServicePrice = widget.selectedPrice!;
+    }
+    if (widget.selectedAddress != null) {
+      _selectedLocation = widget.selectedAddress!;
+    }
     if (widget.serviceCategory != null) {
       _selectedCategory = widget.serviceCategory!;
     }
-    if (widget.selectedService != null && _currentServices.containsKey(widget.selectedService)) {
-      _selectedService = widget.selectedService!;
-    } else {
-      _selectedService = _currentServices.keys.first;
-    }
-    if (widget.selectedAddress != null && widget.selectedAddress!.isNotEmpty) {
-      _selectedLocation = widget.selectedAddress!;
-    }
   }
 
-  Future<void> _checkLocationPermission() async {
-    final hasPermission = await PermissionService.requestLocationPermission(context);
-    setState(() => _hasLocationPermission = hasPermission);
+  List<Map<String, dynamic>> get _currentServices {
+    return _services[_selectedCategory] ?? _services['Car Wash']!;
   }
 
-  void _changeLocation() async {
-    final newLocation = await Navigator.push(context, MaterialPageRoute(builder: (context) => const LocationSearchScreen()));
-    if (newLocation != null && newLocation is String && newLocation.isNotEmpty) {
-      setState(() => _selectedLocation = newLocation);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Delivery location set to: $newLocation'), 
-        backgroundColor: AppColors.success, 
-        duration: const Duration(seconds: 2)
-      ));
-    }
+  Map<String, dynamic> get _currentServiceDetails {
+    return _currentServices.firstWhere(
+      (service) => service['name'] == _selectedService,
+      orElse: () => _currentServices[0],
+    );
   }
 
-  void _changeCategory(String category) {
-    setState(() {
-      _selectedCategory = category;
-      _selectedService = _currentServices.keys.first;
-    });
-  }
-
-  Future<void> _confirmBooking() async {
-    if (_selectedLocation.isEmpty || _selectedLocation == 'Lekki Phase 1, Lagos') {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a valid delivery location'), backgroundColor: Colors.orange)
-      );
-      _changeLocation();
-      return;
-    }
-
-    if (!_hasLocationPermission) {
-      final granted = await PermissionService.requestLocationPermission(context);
-      if (!granted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Location permission is required to find nearby service providers'), backgroundColor: Colors.red)
-        );
-        return;
-      }
-      setState(() => _hasLocationPermission = true);
-    }
-
-    setState(() => _isProcessing = true);
-
-    try {
-      final currentPosition = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 10)
-      );
-      
-      final jobService = JobService();
-      final job = await jobService.createJob(
-        customerId: 'CUST-001',
-        serviceType: _selectedService,
-        price: _selectedPrice,
-        address: _selectedLocation,
-        latitude: currentPosition.latitude,
-        longitude: currentPosition.longitude,
-        category: _selectedCategory,
-      );
-      
-      final nearestProvider = await jobService.findNearestWasher(
-        currentPosition.latitude, 
-        currentPosition.longitude,
-        category: _selectedCategory,
-      );
-      
-      if (nearestProvider == null) throw Exception('No service providers available in your area for $_selectedCategory. Please try again later.');
-      
-      final assignment = await jobService.assignWasher(job['id'], nearestProvider['id']);
-      
-      if (mounted) {
-        setState(() => _isProcessing = false);
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (context) => TrackingScreen(
-              jobId: job['id'],
-              washerName: nearestProvider['name'],
-              pickupAddress: _selectedLocation,
-              pickupLocation: LatLng(currentPosition.latitude, currentPosition.longitude),
-            ),
+  void _showServicePicker() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return Container(
+          padding: const EdgeInsets.all(20),
+          height: 300,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Select Service',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: _currentServices.length,
+                  itemBuilder: (context, index) {
+                    final service = _currentServices[index];
+                    final isSelected = service['name'] == _selectedService;
+                    return ListTile(
+                      tileColor: isSelected ? AppColors.primary.withOpacity(0.1) : null,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      title: Text(service['name']),
+                      subtitle: Text('${service['priceDisplay']} - ${service['duration']}'),
+                      trailing: isSelected
+                          ? const Icon(Icons.check_circle, color: AppColors.primary)
+                          : null,
+                      onTap: () {
+                        setState(() {
+                          _selectedService = service['name'];
+                          _selectedServicePrice = service['price'];
+                        });
+                        Navigator.pop(context);
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
         );
-      }
-    } catch (e) {
-      setState(() => _isProcessing = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString()), backgroundColor: Colors.red, duration: const Duration(seconds: 3))
-      );
-    }
+      },
+    );
+  }
+
+  void _showLocationPicker() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Change Location'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.location_on, color: AppColors.primary),
+              title: const Text('Lekki Phase 1, Lagos'),
+              onTap: () {
+                setState(() => _selectedLocation = 'Lekki Phase 1, Lagos');
+                Navigator.pop(context);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.location_on, color: AppColors.primary),
+              title: const Text('Victoria Island, Lagos'),
+              onTap: () {
+                setState(() => _selectedLocation = 'Victoria Island, Lagos');
+                Navigator.pop(context);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.location_on, color: AppColors.primary),
+              title: const Text('Ikeja, Lagos'),
+              onTap: () {
+                setState(() => _selectedLocation = 'Ikeja, Lagos');
+                Navigator.pop(context);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.location_on, color: AppColors.primary),
+              title: const Text('Surulere, Lagos'),
+              onTap: () {
+                setState(() => _selectedLocation = 'Surulere, Lagos');
+                Navigator.pop(context);
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel', style: TextStyle(color: AppColors.primary)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showPaymentPicker() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return Container(
+          padding: const EdgeInsets.all(20),
+          height: 300,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Select Payment Method',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: _paymentMethods.length,
+                  itemBuilder: (context, index) {
+                    final method = _paymentMethods[index];
+                    final isSelected = method == _selectedPaymentMethod;
+                    return ListTile(
+                      tileColor: isSelected ? AppColors.primary.withOpacity(0.1) : null,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      leading: Icon(
+                        method == 'Wallet' ? Icons.wallet :
+                        method == 'Card' ? Icons.credit_card :
+                        method == 'Bank Transfer' ? Icons.account_balance :
+                        Icons.payments,
+                        color: AppColors.primary,
+                      ),
+                      title: Text(method),
+                      trailing: isSelected
+                          ? const Icon(Icons.check_circle, color: AppColors.primary)
+                          : null,
+                      onTap: () {
+                        setState(() => _selectedPaymentMethod = method);
+                        Navigator.pop(context);
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _proceedToPayment() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => PaymentScreen(
+          serviceName: _selectedService,
+          amount: _selectedServicePrice,
+          location: _selectedLocation,
+          date: _selectedDate,
+          time: _selectedTime,
+          paymentMethod: _selectedPaymentMethod,
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final serviceDetails = _currentServiceDetails;
+    final servicePrice = serviceDetails['price'] ?? 0;
+    final serviceDuration = serviceDetails['duration'] ?? '30 mins';
+    final serviceDescription = serviceDetails['description'] ?? '';
+
     return Scaffold(
+      backgroundColor: AppColors.white,
       appBar: AppBar(
-        title: const Text('Booking Details', style: TextStyle(fontWeight: FontWeight.bold)), 
-        backgroundColor: _currentCategoryColor, 
-        foregroundColor: Colors.white, 
-        elevation: 0, 
+        title: const Text(
+          'Booking Details',
+          style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: AppColors.white,
+        elevation: 0,
+        centerTitle: true,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back), 
-          onPressed: () => Navigator.pop(context)
+          icon: const Icon(Icons.arrow_back, color: AppColors.primary),
+          onPressed: () => Navigator.pop(context),
         ),
       ),
-      body: _isProcessing
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  CircularProgressIndicator(color: _currentCategoryColor),
-                  const SizedBox(height: 20),
-                  Text('Finding nearest ${_selectedCategory.toLowerCase()} provider...'),
-                  const SizedBox(height: 8),
-                  Text('This may take a moment', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                ],
-              ),
-            )
-          : SingleChildScrollView(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(30),
-                    ),
-                    child: Row(
-                      children: _categories.map((category) {
-                        final isSelected = _selectedCategory == category['name'];
-                        return Expanded(
-                          child: GestureDetector(
-                            onTap: () => _changeCategory(category['name']),
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(vertical: 10),
-                              decoration: BoxDecoration(
-                                color: isSelected ? category['color'] : Colors.transparent,
-                                borderRadius: BorderRadius.circular(25),
-                              ),
-                              child: Row(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(category['icon'], size: 18, color: isSelected ? Colors.white : category['color']),
-                                  const SizedBox(width: 6),
-                                  Text(category['name'], style: TextStyle(color: isSelected ? Colors.white : category['color'], fontWeight: isSelected ? FontWeight.bold : FontWeight.normal, fontSize: 13)),
-                                ],
-                              ),
-                            ),
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  const Text('Service Selected', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  Card(
-                    elevation: 2, 
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    child: ListTile(
-                      leading: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: _currentCategoryColor.withOpacity(0.1), borderRadius: BorderRadius.circular(10)), child: Icon(_currentService['icon'], color: _currentCategoryColor, size: 24)),
-                      title: Text(_selectedService, style: const TextStyle(fontWeight: FontWeight.w600)),
-                      subtitle: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('$_selectedPriceDisplay • ${_currentService['duration']}'),
-                          Text(_currentService['description'], style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
-                          if (_currentService.containsKey('weight')) Text('Weight: ${_currentService['weight']}', style: TextStyle(fontSize: 10, color: Colors.grey)),
-                          if (_currentService.containsKey('bedrooms')) Text('Bedrooms: ${_currentService['bedrooms']}', style: TextStyle(fontSize: 10, color: Colors.grey)),
-                        ],
+      body: Column(
+        children: [
+          // Category Tabs - All Green
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              children: _categories.map((category) {
+                final isSelected = _selectedCategory == category;
+                return Expanded(
+                  child: GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _selectedCategory = category;
+                        _selectedService = _services[category]![0]['name'];
+                        _selectedServicePrice = _services[category]![0]['price'];
+                      });
+                    },
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 4),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      decoration: BoxDecoration(
+                        color: isSelected ? AppColors.primary : Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(30),
                       ),
-                      trailing: TextButton(onPressed: _showServiceDialog, child: const Text('Change')),
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  const Text('Delivery Location', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  Card(
-                    elevation: 2,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    child: InkWell(
-                      onTap: _changeLocation,
-                      borderRadius: BorderRadius.circular(12),
-                      child: Padding(
-                        padding: const EdgeInsets.all(16),
-                        child: Row(
-                          children: [
-                            Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: _currentCategoryColor.withOpacity(0.1), borderRadius: BorderRadius.circular(10)), child: const Icon(Icons.location_on, color: AppColors.primary, size: 24)),
-                            const SizedBox(width: 12),
-                            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('Selected Location', style: TextStyle(fontSize: 12, color: Colors.grey)), Text(_selectedLocation, style: const TextStyle(fontWeight: FontWeight.w500), maxLines: 2, overflow: TextOverflow.ellipsis)])),
-                            const Icon(Icons.edit, size: 20, color: AppColors.primary),
-                          ],
+                      child: Center(
+                        child: Text(
+                          category,
+                          style: TextStyle(
+                            color: isSelected ? Colors.white : AppColors.primary,
+                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                            fontSize: 13,
+                          ),
                         ),
                       ),
                     ),
                   ),
-                  const SizedBox(height: 20),
-                  const Text('Preferred Date & Time', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  Card(
-                    elevation: 2,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        children: [
-                          Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [_buildDateOption(0), _buildDateOption(1), _buildDateOption(2), _buildDateOption(3), _buildDateOption(4)]),
-                          const SizedBox(height: 20),
-                          const Divider(),
-                          const SizedBox(height: 16),
-                          const Text('Select Time', style: TextStyle(fontWeight: FontWeight.w600)),
-                          const SizedBox(height: 12),
-                          Wrap(spacing: 12, runSpacing: 12, children: _timeSlots.map((slot) {
-                            final isSelected = _selectedTimeSlot == slot;
-                            return FilterChip(label: Text(slot), selected: isSelected, onSelected: (selected) => setState(() => _selectedTimeSlot = slot), selectedColor: _currentCategoryColor, checkmarkColor: Colors.white, backgroundColor: Colors.grey.shade100, labelStyle: TextStyle(color: isSelected ? Colors.white : AppColors.grey800));
-                          }).toList()),
-                        ],
-                      ),
+                );
+              }).toList(),
+            ),
+          ),
+
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Service Selected - Green
+                  _buildSectionTitle('Service Selected'),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.primary.withOpacity(0.1)),
                     ),
-                  ),
-                  const SizedBox(height: 20),
-                  const Text('Payment Method', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
-                  Card(
-                    elevation: 2,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    child: Column(
+                    child: Row(
                       children: [
-                        RadioListTile(title: const Text('Paystack', style: TextStyle(fontWeight: FontWeight.w500)), subtitle: const Text('Card, Bank Transfer, USSD'), value: 'Paystack', groupValue: _selectedPayment, onChanged: (value) => setState(() => _selectedPayment = value!), activeColor: _currentCategoryColor, secondary: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.orange.withOpacity(0.1), borderRadius: BorderRadius.circular(10)), child: const Icon(Icons.payment, color: AppColors.primary))),
-                        RadioListTile(title: const Text('Wallet', style: TextStyle(fontWeight: FontWeight.w500)), subtitle: const Text('Balance: ₦5,000'), value: 'Wallet', groupValue: _selectedPayment, onChanged: (value) => setState(() => _selectedPayment = value!), activeColor: _currentCategoryColor, secondary: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: Colors.green.withOpacity(0.1), borderRadius: BorderRadius.circular(10)), child: const Icon(Icons.wallet, color: AppColors.primary))),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _selectedService,
+                                style: const TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '₦${NumberFormat('#,###').format(servicePrice)} · $serviceDuration',
+                                style: TextStyle(
+                                  color: AppColors.primary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              if (serviceDescription.isNotEmpty)
+                                Text(
+                                  serviceDescription,
+                                  style: const TextStyle(
+                                    color: Colors.grey,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: _showServicePicker,
+                          child: const Text(
+                            'Change',
+                            style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600),
+                          ),
+                        ),
                       ],
                     ),
                   ),
+
                   const SizedBox(height: 20),
-                  Container(padding: const EdgeInsets.all(16), decoration: BoxDecoration(color: _currentCategoryColor.withOpacity(0.1), borderRadius: BorderRadius.circular(12), border: Border.all(color: _currentCategoryColor.withOpacity(0.2))), child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [const Text('Estimated Total', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)), Column(crossAxisAlignment: CrossAxisAlignment.end, children: [Text('$_selectedPriceDisplay', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: _currentCategoryColor)), const Text('Includes VAT', style: TextStyle(fontSize: 10, color: AppColors.grey500))])])),
-                  const SizedBox(height: 30),
-                  SizedBox(width: double.infinity, height: 55, child: ElevatedButton(onPressed: _confirmBooking, style: ElevatedButton.styleFrom(backgroundColor: _currentCategoryColor, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))), child: Text('Confirm $_selectedCategory Booking', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)))),
-                  if (_selectedLocation == 'Lekki Phase 1, Lagos') Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8)), child: Row(children: [Icon(Icons.info_outline, color: Colors.blue.shade700), const SizedBox(width: 8), Expanded(child: Text('Tap on the location card to search for your exact address across Nigeria', style: TextStyle(color: Colors.blue.shade700, fontSize: 12)))])),
+
+                  // Delivery Location - Green
+                  _buildSectionTitle('Delivery Location'),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.primary.withOpacity(0.1)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.location_on, color: AppColors.primary),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            _selectedLocation,
+                            style: const TextStyle(fontWeight: FontWeight.w500),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: _showLocationPicker,
+                          child: const Text(
+                            'Change',
+                            style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // Preferred Date & Time - Green
+                  _buildSectionTitle('Preferred Date & Time'),
+
+                  // Date Selection
+                  Container(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.primary.withOpacity(0.1)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(
+                          height: 60,
+                          child: ListView.builder(
+                            scrollDirection: Axis.horizontal,
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            itemCount: 7,
+                            itemBuilder: (context, index) {
+                              final date = DateTime.now().add(Duration(days: index));
+                              final isSelected = _selectedDate.day == date.day &&
+                                  _selectedDate.month == date.month;
+                              final dayName = DateFormat('E').format(date);
+                              final dayNumber = date.day.toString();
+                              return GestureDetector(
+                                onTap: () => setState(() => _selectedDate = date),
+                                child: Container(
+                                  width: 65,
+                                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                                  decoration: BoxDecoration(
+                                    color: isSelected ? AppColors.primary : AppColors.white,
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                      color: isSelected ? AppColors.primary : Colors.grey.shade300,
+                                    ),
+                                  ),
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Text(
+                                        index == 0 ? 'Today' : index == 1 ? 'Tomorrow' : dayName,
+                                        style: TextStyle(
+                                          color: isSelected ? Colors.white : Colors.grey,
+                                          fontSize: 10,
+                                        ),
+                                      ),
+                                      Text(
+                                        dayNumber,
+                                        style: TextStyle(
+                                          color: isSelected ? Colors.white : Colors.black87,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 16,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        const Divider(height: 16),
+                        // Time Selection
+                        SizedBox(
+                          height: 50,
+                          child: ListView.builder(
+                            scrollDirection: Axis.horizontal,
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                            itemCount: _timeSlots.length,
+                            itemBuilder: (context, index) {
+                              final time = _timeSlots[index];
+                              final isSelected = _selectedTime == time;
+                              return GestureDetector(
+                                onTap: () => setState(() => _selectedTime = time),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                                  decoration: BoxDecoration(
+                                    color: isSelected ? AppColors.primary : AppColors.white,
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(
+                                      color: isSelected ? AppColors.primary : Colors.grey.shade300,
+                                    ),
+                                  ),
+                                  child: Center(
+                                    child: Text(
+                                      time,
+                                      style: TextStyle(
+                                        color: isSelected ? Colors.white : Colors.black87,
+                                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // Payment Method - Green
+                  _buildSectionTitle('Payment Method'),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.primary.withOpacity(0.1)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          _selectedPaymentMethod == 'Wallet' ? Icons.wallet :
+                          _selectedPaymentMethod == 'Card' ? Icons.credit_card :
+                          _selectedPaymentMethod == 'Bank Transfer' ? Icons.account_balance :
+                          Icons.payments,
+                          color: AppColors.primary,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            _selectedPaymentMethod,
+                            style: const TextStyle(fontWeight: FontWeight.w500),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: _showPaymentPicker,
+                          child: const Text(
+                            'Change',
+                            style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 32),
+
+                  // Continue Button - Green
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      onPressed: _proceedToPayment,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.primary,
+                        foregroundColor: AppColors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        'Proceed to Payment',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
+          ),
+        ],
+      ),
     );
   }
 
-  Widget _buildDateOption(int daysFromNow) {
-    final date = DateTime.now().add(Duration(days: daysFromNow));
-    final isSelected = _selectedDate.year == date.year && _selectedDate.month == date.month && _selectedDate.day == date.day;
-    String dayLabel = daysFromNow == 0 ? 'Today' : daysFromNow == 1 ? 'Tomorrow' : date.day.toString();
-    final monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    return GestureDetector(
-      onTap: () => setState(() => _selectedDate = date),
-      child: Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10), decoration: BoxDecoration(color: isSelected ? _currentCategoryColor : Colors.transparent, borderRadius: BorderRadius.circular(30), border: Border.all(color: isSelected ? _currentCategoryColor : AppColors.grey300)), child: Column(children: [Text(dayLabel, style: TextStyle(color: isSelected ? Colors.white : AppColors.grey800, fontWeight: FontWeight.w600)), const SizedBox(height: 2), Text('${monthNames[date.month - 1]} ${date.day}', style: TextStyle(color: isSelected ? Colors.white70 : AppColors.grey500, fontSize: 10))])),
-    );
-  }
-
-  void _showServiceDialog() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (context) => Container(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Select Service', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 16),
-            ..._currentServices.keys.map((service) => ListTile(
-              leading: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: _currentCategoryColor.withOpacity(0.1), borderRadius: BorderRadius.circular(10)), child: Icon(_currentServices[service]!['icon'], color: _currentCategoryColor, size: 24)),
-              title: Text(service, style: const TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('${_currentServices[service]!['priceDisplay']} • ${_currentServices[service]!['duration']}'), Text(_currentServices[service]!['description'], style: TextStyle(fontSize: 11, color: Colors.grey.shade600))]),
-              trailing: _selectedService == service ? Icon(Icons.check_circle, color: _currentCategoryColor) : null,
-              onTap: () { setState(() => _selectedService = service); Navigator.pop(context); },
-            )),
-            const SizedBox(height: 20),
-          ],
+  Widget _buildSectionTitle(String title) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Text(
+        title,
+        style: const TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.bold,
+          color: Colors.black87,
         ),
       ),
     );
