@@ -1,9 +1,10 @@
 // FILE: lib/services/auth_service.dart
-// PURPOSE: Handle user authentication with persistent storage
-// UPDATED: Added support for House Cleaning and Laundry Services
+// PURPOSE: Handle user authentication with Firebase integration
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:convert';
 
 class AuthService extends ChangeNotifier {
@@ -11,7 +12,7 @@ class AuthService extends ChangeNotifier {
   String? _userName;
   String? _userPhone;
   String? _userId;
-  String? _userRole; // customer, washer, cleaner, laundry_provider
+  String? _userRole; // customer, washer, cleaner, laundry_provider, admin
   String? _serviceCategory; // Car Wash, House Cleaning, Laundry
   
   // Store registered users
@@ -19,6 +20,81 @@ class AuthService extends ChangeNotifier {
 
   AuthService() {
     _loadSavedUser();
+    _listenToAuthChanges();
+  }
+
+  // ============================================================
+  // Listen to Firebase Auth changes
+  // ============================================================
+  void _listenToAuthChanges() {
+    FirebaseAuth.instance.authStateChanges().listen((User? user) async {
+      if (user != null) {
+        print('✅ Firebase Auth: User signed in: ${user.uid}');
+        _userId = user.uid;
+        _isLoggedIn = true;
+        await _loadUserFromFirestore(user.uid);
+        await _saveUserState();
+        notifyListeners();
+      } else {
+        print('❌ Firebase Auth: User signed out');
+        _isLoggedIn = false;
+        _userName = null;
+        _userPhone = null;
+        _userId = null;
+        _userRole = null;
+        _serviceCategory = null;
+        await _saveUserState();
+        notifyListeners();
+      }
+    });
+  }
+
+  // ============================================================
+  // Load user from Firestore
+  // ============================================================
+  Future<void> _loadUserFromFirestore(String uid) async {
+    try {
+      DocumentSnapshot doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get();
+      
+      if (doc.exists) {
+        final data = doc.data() as Map<String, dynamic>;
+        _userName = data['name'] ?? 'User';
+        _userPhone = data['phone'] ?? '';
+        _userRole = data['role'] ?? 'customer';
+        _serviceCategory = data['serviceCategory'];
+        _isLoggedIn = true;
+        print('✅ User loaded from Firestore: $_userName (role: $_userRole)');
+      } else {
+        await _createUserDocument(uid);
+      }
+    } catch (e) {
+      print('❌ Error loading user from Firestore: $e');
+    }
+  }
+
+  // ============================================================
+  // Create user document if missing
+  // ============================================================
+  Future<void> _createUserDocument(String uid) async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      await FirebaseFirestore.instance.collection('users').doc(uid).set({
+        'name': user?.displayName ?? 'User',
+        'phone': user?.phoneNumber ?? '',
+        'email': user?.email ?? '',
+        'role': 'customer',
+        'isBlocked': false,
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      print('✅ Created user document for: $uid');
+      await _loadUserFromFirestore(uid);
+    } catch (e) {
+      print('❌ Error creating user document: $e');
+    }
   }
 
   bool get isLoggedIn => _isLoggedIn;
@@ -32,6 +108,7 @@ class AuthService extends ChangeNotifier {
   bool get isWasher => _userRole == 'washer';
   bool get isCleaner => _userRole == 'cleaner';
   bool get isLaundryProvider => _userRole == 'laundry_provider';
+  bool get isAdmin => _userRole == 'admin';
   bool get isServiceProvider => isWasher || isCleaner || isLaundryProvider;
 
   Future<void> _loadSavedUser() async {
@@ -43,7 +120,6 @@ class AuthService extends ChangeNotifier {
     _userRole = prefs.getString('userRole');
     _serviceCategory = prefs.getString('serviceCategory');
     
-    // Load registered users from storage
     final usersJson = prefs.getString('registeredUsers');
     if (usersJson != null) {
       final Map<String, dynamic> users = jsonDecode(usersJson);
@@ -64,58 +140,227 @@ class AuthService extends ChangeNotifier {
     if (_userRole != null) await prefs.setString('userRole', _userRole!);
     if (_serviceCategory != null) await prefs.setString('serviceCategory', _serviceCategory!);
     
-    // Save registered users as JSON
     final usersJson = jsonEncode(_registeredUsers);
     await prefs.setString('registeredUsers', usersJson);
   }
 
-  // ==================== AUTHENTICATION ====================
-  
+  // ============================================================
+  // SIGNUP - Creates user in Firebase Auth
+  // ============================================================
   Future<bool> signup(String name, String phoneNumber, String password) async {
-    await Future.delayed(const Duration(seconds: 1));
-    
-    final cleaned = phoneNumber.replaceAll(RegExp(r'[^0-9]'), '');
-    final formattedPhone = cleaned.length == 10 ? '+234$cleaned' : phoneNumber;
-    
-    if (name.isEmpty || cleaned.length < 10 || password.isEmpty) {
+    try {
+      final cleaned = phoneNumber.replaceAll(RegExp(r'[^0-9]'), '');
+      final formattedPhone = cleaned.length == 10 ? '+234$cleaned' : phoneNumber;
+      
+      if (name.isEmpty || cleaned.length < 10 || password.isEmpty) {
+        return false;
+      }
+      
+      if (_registeredUsers.containsKey(formattedPhone)) {
+        return false;
+      }
+      
+      final email = '${formattedPhone.replaceAll('+', '')}@gwashng.com';
+      
+      UserCredential userCredential = await FirebaseAuth.instance
+          .createUserWithEmailAndPassword(
+            email: email,
+            password: password,
+          );
+      
+      final String uid = userCredential.user!.uid;
+      
+      await FirebaseFirestore.instance.collection('users').doc(uid).set({
+        'name': name,
+        'phone': formattedPhone,
+        'email': email,
+        'role': 'customer',
+        'isBlocked': false,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      print('✅ User saved to Firestore: $name with ID: $uid');
+      
+      _registeredUsers[formattedPhone] = {
+        'name': name,
+        'password': password,
+        'phone': formattedPhone,
+        'userId': uid,
+        'role': 'customer',
+      };
+      
+      _isLoggedIn = true;
+      _userName = name;
+      _userPhone = formattedPhone;
+      _userId = uid;
+      _userRole = 'customer';
+      _serviceCategory = null;
+      await _saveUserState();
+      notifyListeners();
+      print('✅ User logged in after signup: $name (ID: $uid)');
+      return true;
+      
+    } on FirebaseAuthException catch (e) {
+      print('❌ Firebase Auth signup error: ${e.message}');
+      if (e.code == 'email-already-in-use') {
+        print('📝 User already exists in Firebase Auth - trying login...');
+        return await login(phoneNumber, password);
+      }
+      return false;
+    } catch (e) {
+      print('❌ Signup error: $e');
       return false;
     }
-    
-    // Check if user already exists
-    if (_registeredUsers.containsKey(formattedPhone)) {
-      return false;
-    }
-    
-    // Generate a simple user ID
-    final userId = DateTime.now().millisecondsSinceEpoch.toString();
-    
-    // Store the new user
-    _registeredUsers[formattedPhone] = {
-      'name': name,
-      'password': password,
-      'phone': formattedPhone,
-      'userId': userId,
-      'role': 'customer', // Default role
-    };
-    
-    _isLoggedIn = true;
-    _userName = name;
-    _userPhone = formattedPhone;
-    _userId = userId;
-    _userRole = 'customer';
-    _serviceCategory = null;
-    await _saveUserState();
-    notifyListeners();
-    return true;
   }
 
+  // ============================================================
+  // FIXED: LOGIN - Checks Firestore FIRST before Firebase Auth
+  // ============================================================
   Future<bool> login(String phoneNumber, String password) async {
-    await Future.delayed(const Duration(seconds: 1));
-    
-    final cleaned = phoneNumber.replaceAll(RegExp(r'[^0-9]'), '');
-    final formattedPhone = cleaned.length == 10 ? '+234$cleaned' : phoneNumber;
-    
-    // Check if user exists in registered users
+    try {
+      final cleaned = phoneNumber.replaceAll(RegExp(r'[^0-9]'), '');
+      final formattedPhone = cleaned.length == 10 ? '+234$cleaned' : phoneNumber;
+      
+      if (cleaned.length < 10) {
+        print('❌ Invalid phone number: $formattedPhone');
+        return false;
+      }
+      
+      final email = '${formattedPhone.replaceAll('+', '')}@gwashng.com';
+      
+      // ============================================================
+      // STEP 1: Check if user exists in Firestore FIRST
+      // ============================================================
+      print('📝 Checking Firestore for user: $formattedPhone');
+      
+      final querySnapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .where('phone', isEqualTo: formattedPhone)
+          .limit(1)
+          .get();
+      
+      if (querySnapshot.docs.isNotEmpty) {
+        print('✅ User found in Firestore');
+        final userData = querySnapshot.docs.first.data();
+        final firestoreUserId = querySnapshot.docs.first.id;
+        final userName = userData['name'] ?? 'User';
+        final userRole = userData['role'] ?? 'customer';
+        final userServiceCategory = userData['serviceCategory'];
+        
+        // ============================================================
+        // STEP 2: Try Firebase Auth login
+        // ============================================================
+        try {
+          UserCredential userCredential = await FirebaseAuth.instance
+              .signInWithEmailAndPassword(
+                email: email,
+                password: password,
+              );
+          
+          final uid = userCredential.user!.uid;
+          
+          // Update user state
+          _isLoggedIn = true;
+          _userId = uid;
+          _userName = userName;
+          _userPhone = formattedPhone;
+          _userRole = userRole;
+          _serviceCategory = userServiceCategory;
+          
+          // Check if user is a washer
+          await _checkIfWasher(uid);
+          
+          await _saveUserState();
+          notifyListeners();
+          print('✅ User logged in with Firebase Auth: $_userName (role: $_userRole)');
+          return true;
+          
+        } on FirebaseAuthException catch (e) {
+          print('❌ Firebase Auth error: ${e.message}');
+          
+          // ============================================================
+          // STEP 3: If user not found in Firebase Auth, CREATE them
+          // ============================================================
+          if (e.code == 'user-not-found') {
+            print('📝 User not in Firebase Auth - creating now...');
+            
+            try {
+              // Create the user in Firebase Auth
+              UserCredential newUser = await FirebaseAuth.instance
+                  .createUserWithEmailAndPassword(
+                    email: email,
+                    password: password,
+                  );
+              
+              final uid = newUser.user!.uid;
+              
+              // Update Firestore with the new UID
+              await FirebaseFirestore.instance.collection('users').doc(uid).set({
+                'name': userName,
+                'phone': formattedPhone,
+                'email': email,
+                'role': userRole,
+                'serviceCategory': userServiceCategory,
+                'isBlocked': false,
+                'createdAt': FieldValue.serverTimestamp(),
+                'updatedAt': FieldValue.serverTimestamp(),
+              });
+              
+              // Delete the old document if it has a different ID
+              if (firestoreUserId != uid) {
+                await FirebaseFirestore.instance
+                    .collection('users')
+                    .doc(firestoreUserId)
+                    .delete();
+              }
+              
+              // Set user state
+              _isLoggedIn = true;
+              _userId = uid;
+              _userName = userName;
+              _userPhone = formattedPhone;
+              _userRole = userRole;
+              _serviceCategory = userServiceCategory;
+              
+              await _checkIfWasher(uid);
+              await _saveUserState();
+              notifyListeners();
+              print('✅ User created in Firebase Auth and logged in: $_userName');
+              return true;
+              
+            } on FirebaseAuthException catch (createError) {
+              print('❌ Failed to create user in Firebase Auth: ${createError.message}');
+              return _localLogin(formattedPhone, password);
+            }
+          }
+          
+          // If it's a wrong password error
+          if (e.code == 'wrong-password') {
+            print('❌ Wrong password');
+            return false;
+          }
+          
+          return false;
+        }
+      } else {
+        print('❌ User not found in Firestore');
+        
+        // ============================================================
+        // STEP 4: Try local login as fallback
+        // ============================================================
+        return _localLogin(formattedPhone, password);
+      }
+      
+    } catch (e) {
+      print('❌ Login error: $e');
+      return false;
+    }
+  }
+
+  // ============================================================
+  // LOCAL LOGIN - Fallback
+  // ============================================================
+  Future<bool> _localLogin(String formattedPhone, String password) async {
+    // Check local storage
     if (_registeredUsers.containsKey(formattedPhone)) {
       if (_registeredUsers[formattedPhone]!['password'] == password) {
         _isLoggedIn = true;
@@ -126,27 +371,83 @@ class AuthService extends ChangeNotifier {
         _serviceCategory = _registeredUsers[formattedPhone]!['serviceCategory'];
         await _saveUserState();
         notifyListeners();
+        print('✅ User logged in from local storage: $_userName');
         return true;
+      } else {
+        print('❌ Wrong password for local user');
+        return false;
       }
     }
     
-    // Demo login for testing (any phone + 123456)
-    if (password == '123456' && cleaned.length >= 10) {
-      _isLoggedIn = true;
-      _userName = 'Demo User';
-      _userPhone = formattedPhone;
-      _userId = DateTime.now().millisecondsSinceEpoch.toString();
-      _userRole = 'customer';
-      _serviceCategory = null;
-      await _saveUserState();
-      notifyListeners();
-      return true;
-    }
-    
+    print('❌ Login failed for: $formattedPhone');
     return false;
   }
 
+  // ============================================================
+  // Check if user is a washer
+  // ============================================================
+  Future<void> _checkIfWasher(String uid) async {
+    try {
+      final washerDoc = await FirebaseFirestore.instance
+          .collection('washers')
+          .doc(uid)
+          .get();
+      
+      if (washerDoc.exists) {
+        _userRole = 'washer';
+        _serviceCategory = 'Car Wash';
+        print('✅ User is a WASHER');
+      }
+    } catch (e) {
+      // Ignore - user is not a washer
+    }
+  }
+
+  // ============================================================
+  // DEMO LOGIN - Only for testing
+  // ============================================================
+  Future<bool> demoLogin(String phoneNumber) async {
+    final cleaned = phoneNumber.replaceAll(RegExp(r'[^0-9]'), '');
+    final formattedPhone = cleaned.length == 10 ? '+234$cleaned' : phoneNumber;
+    
+    if (cleaned.length < 10) return false;
+    
+    _isLoggedIn = true;
+    _userName = 'Demo User';
+    _userPhone = formattedPhone;
+    _userId = DateTime.now().millisecondsSinceEpoch.toString();
+    _userRole = 'customer';
+    _serviceCategory = null;
+    
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(_userId).set({
+        'name': _userName,
+        'phone': formattedPhone,
+        'role': 'customer',
+        'isBlocked': false,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      print('✅ Demo user saved to Firestore');
+    } catch (e) {
+      print('❌ Could not save demo user to Firestore: $e');
+    }
+    
+    await _saveUserState();
+    notifyListeners();
+    print('✅ Demo user logged in: $_userName');
+    return true;
+  }
+
+  // ============================================================
+  // LOGOUT - Clears Firebase Auth
+  // ============================================================
   Future<void> logout() async {
+    try {
+      await FirebaseAuth.instance.signOut();
+    } catch (e) {
+      print('❌ Firebase signout error: $e');
+    }
+    
     _isLoggedIn = false;
     _userName = null;
     _userPhone = null;
@@ -155,24 +456,15 @@ class AuthService extends ChangeNotifier {
     _serviceCategory = null;
     await _saveUserState();
     notifyListeners();
+    print('✅ User logged out');
   }
 
   // ==================== GETTER METHODS ====================
   
-  String? getCurrentUserId() {
-    return _userId;
-  }
-  
-  String? getCurrentUserPhone() {
-    return _userPhone;
-  }
-  
-  String? getCurrentUserRole() {
-    return _userRole;
-  }
+  String? getCurrentUserId() => _userId;
+  String? getCurrentUserPhone() => _userPhone;
+  String? getCurrentUserRole() => _userRole;
 
-  // ==================== RELOAD USER DATA ====================
-  
   Future<void> reloadUserData() async {
     final prefs = await SharedPreferences.getInstance();
     _isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
@@ -184,9 +476,79 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> refreshUserData() async {
+    print('🔄 Refreshing user data from Firestore...');
+    
+    if (!_isLoggedIn || _userId == null) {
+      print('❌ Cannot refresh: user not logged in');
+      return;
+    }
+    
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(_userId!)
+          .get();
+      
+      if (doc.exists) {
+        final data = doc.data()!;
+        _userName = data['name'] ?? _userName;
+        _userPhone = data['phone'] ?? _userPhone;
+        _userRole = data['role'] ?? 'customer';
+        _serviceCategory = data['serviceCategory'];
+        await _saveUserState();
+        notifyListeners();
+        print('✅ User data refreshed: $_userName (role: $_userRole)');
+      }
+    } catch (e) {
+      print('❌ Error refreshing user data: $e');
+    }
+  }
+
+  // ============================================================
+  // Migrate local users to Firestore
+  // ============================================================
+  Future<void> migrateLocalUsersToFirestore() async {
+    int successCount = 0;
+    int failCount = 0;
+    
+    await _loadSavedUser();
+    
+    for (var entry in _registeredUsers.entries) {
+      final phone = entry.key;
+      final userData = entry.value;
+      
+      try {
+        final existing = await FirebaseFirestore.instance
+            .collection('users')
+            .where('phone', isEqualTo: phone)
+            .limit(1)
+            .get();
+        
+        if (existing.docs.isEmpty) {
+          final docRef = await FirebaseFirestore.instance.collection('users').add({
+            'name': userData['name'] ?? 'Unknown',
+            'phone': phone,
+            'role': userData['role'] ?? 'customer',
+            'isBlocked': false,
+            'createdAt': FieldValue.serverTimestamp(),
+          });
+          successCount++;
+          print('✅ Migrated user: ${userData['name']} (ID: ${docRef.id})');
+        } else {
+          print('⏭️ User already exists: ${userData['name']}');
+        }
+      } catch (e) {
+        failCount++;
+        print('❌ Failed to migrate user: $e');
+      }
+    }
+    
+    print('✅ Migration complete: $successCount added, $failCount failed');
+  }
+
   // ==================== SERVICE PROVIDER METHODS ====================
   
-  // Register as Car Wash provider
   Future<void> saveWasherData({
     required String uid,
     required String vehicleType,
@@ -200,17 +562,39 @@ class AuthService extends ChangeNotifier {
     await prefs.setString('serviceCategory', 'Car Wash');
     await prefs.setString('vehicle_type', vehicleType);
     await prefs.setInt('working_radius', workingRadius);
-    await prefs.setString('provider_status', 'pending');
+    await prefs.setString('provider_status', 'approved');
     await prefs.setString('bank_name', bankName);
     await prefs.setString('account_number', accountNumber);
     await prefs.setString('account_name', accountName);
     
-    // Update registered users
-    if (_userId != null && _registeredUsers.containsKey(_userPhone)) {
-      _registeredUsers[_userPhone!]?['role'] = 'washer';
-      _registeredUsers[_userPhone!]?['serviceCategory'] = 'Car Wash';
-      _registeredUsers[_userPhone!]?['vehicleType'] = vehicleType;
-      await _saveUserState();
+    try {
+      await FirebaseFirestore.instance.collection('washers').doc(_userId).set({
+        'userId': _userId,
+        'name': _userName,
+        'phone': _userPhone,
+        'vehicleType': vehicleType,
+        'workingRadius': workingRadius,
+        'bankName': bankName,
+        'accountNumber': accountNumber,
+        'accountName': accountName,
+        'isOnline': true,
+        'approved': true,
+        'rating': 0.0,
+        'totalJobs': 0,
+        'totalEarnings': 0,
+        'pendingJobs': 0,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      
+      await FirebaseFirestore.instance.collection('users').doc(_userId).update({
+        'role': 'washer',
+        'serviceCategory': 'Car Wash',
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      
+      print('✅ Washer saved to Firestore');
+    } catch (e) {
+      print('❌ Failed to save washer to Firestore: $e');
     }
     
     _userRole = 'washer';
@@ -218,7 +602,6 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
   }
   
-  // Register as House Cleaning provider
   Future<void> saveCleanerData({
     required String uid,
     required String specialization,
@@ -233,18 +616,41 @@ class AuthService extends ChangeNotifier {
     await prefs.setString('serviceCategory', 'House Cleaning');
     await prefs.setString('specialization', specialization);
     await prefs.setInt('working_radius', workingRadius);
-    await prefs.setString('provider_status', 'pending');
+    await prefs.setString('provider_status', 'approved');
     await prefs.setString('bank_name', bankName);
     await prefs.setString('account_number', accountNumber);
     await prefs.setString('account_name', accountName);
     await prefs.setStringList('cleaning_tools', cleaningTools);
     
-    // Update registered users
-    if (_userId != null && _registeredUsers.containsKey(_userPhone)) {
-      _registeredUsers[_userPhone!]?['role'] = 'cleaner';
-      _registeredUsers[_userPhone!]?['serviceCategory'] = 'House Cleaning';
-      _registeredUsers[_userPhone!]?['specialization'] = specialization;
-      await _saveUserState();
+    try {
+      await FirebaseFirestore.instance.collection('washers').doc(_userId).set({
+        'userId': _userId,
+        'name': _userName,
+        'phone': _userPhone,
+        'specialization': specialization,
+        'workingRadius': workingRadius,
+        'bankName': bankName,
+        'accountNumber': accountNumber,
+        'accountName': accountName,
+        'cleaningTools': cleaningTools,
+        'isOnline': true,
+        'approved': true,
+        'rating': 0.0,
+        'totalJobs': 0,
+        'totalEarnings': 0,
+        'pendingJobs': 0,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      
+      await FirebaseFirestore.instance.collection('users').doc(_userId).update({
+        'role': 'cleaner',
+        'serviceCategory': 'House Cleaning',
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      
+      print('✅ Cleaner saved to Firestore');
+    } catch (e) {
+      print('❌ Failed to save cleaner to Firestore: $e');
     }
     
     _userRole = 'cleaner';
@@ -252,7 +658,6 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
   }
   
-  // Register as Laundry provider
   Future<void> saveLaundryProviderData({
     required String uid,
     required String businessName,
@@ -267,18 +672,41 @@ class AuthService extends ChangeNotifier {
     await prefs.setString('serviceCategory', 'Laundry');
     await prefs.setString('business_name', businessName);
     await prefs.setInt('working_radius', workingRadius);
-    await prefs.setString('provider_status', 'pending');
+    await prefs.setString('provider_status', 'approved');
     await prefs.setString('bank_name', bankName);
     await prefs.setString('account_number', accountNumber);
     await prefs.setString('account_name', accountName);
     await prefs.setString('turnaround_time', turnaroundTime);
     
-    // Update registered users
-    if (_userId != null && _registeredUsers.containsKey(_userPhone)) {
-      _registeredUsers[_userPhone!]?['role'] = 'laundry_provider';
-      _registeredUsers[_userPhone!]?['serviceCategory'] = 'Laundry';
-      _registeredUsers[_userPhone!]?['businessName'] = businessName;
-      await _saveUserState();
+    try {
+      await FirebaseFirestore.instance.collection('washers').doc(_userId).set({
+        'userId': _userId,
+        'name': _userName,
+        'phone': _userPhone,
+        'businessName': businessName,
+        'workingRadius': workingRadius,
+        'bankName': bankName,
+        'accountNumber': accountNumber,
+        'accountName': accountName,
+        'turnaroundTime': turnaroundTime,
+        'isOnline': true,
+        'approved': true,
+        'rating': 0.0,
+        'totalJobs': 0,
+        'totalEarnings': 0,
+        'pendingJobs': 0,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+      
+      await FirebaseFirestore.instance.collection('users').doc(_userId).update({
+        'role': 'laundry_provider',
+        'serviceCategory': 'Laundry',
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      
+      print('✅ Laundry provider saved to Firestore');
+    } catch (e) {
+      print('❌ Failed to save laundry provider to Firestore: $e');
     }
     
     _userRole = 'laundry_provider';
@@ -286,7 +714,6 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
   }
 
-  // Get provider status
   Future<bool> isProviderApproved() async {
     final prefs = await SharedPreferences.getInstance();
     final status = prefs.getString('provider_status');
@@ -295,16 +722,15 @@ class AuthService extends ChangeNotifier {
   
   Future<String> getProviderStatus() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('provider_status') ?? 'pending';
+    return prefs.getString('provider_status') ?? 'approved';
   }
   
-  // Get provider data based on role
   Future<Map<String, dynamic>> getProviderData() async {
     final prefs = await SharedPreferences.getInstance();
     final role = _userRole ?? prefs.getString('userRole');
     
     Map<String, dynamic> data = {
-      'status': prefs.getString('provider_status') ?? 'pending',
+      'status': prefs.getString('provider_status') ?? 'approved',
       'workingRadius': prefs.getInt('working_radius') ?? 10,
       'bankName': prefs.getString('bank_name') ?? '',
       'accountNumber': prefs.getString('account_number') ?? '',
@@ -313,7 +739,6 @@ class AuthService extends ChangeNotifier {
       'serviceCategory': _serviceCategory ?? prefs.getString('serviceCategory'),
     };
     
-    // Add role-specific data
     if (role == 'washer') {
       data['vehicleType'] = prefs.getString('vehicle_type') ?? '';
     } else if (role == 'cleaner') {
@@ -327,14 +752,12 @@ class AuthService extends ChangeNotifier {
     return data;
   }
   
-  // For testing - allow admin to approve provider
   Future<void> setProviderApproved(bool approved) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('provider_status', approved ? 'approved' : 'pending');
     notifyListeners();
   }
   
-  // Get service category display name
   String getServiceCategoryDisplay() {
     switch (_serviceCategory) {
       case 'House Cleaning':
@@ -348,7 +771,6 @@ class AuthService extends ChangeNotifier {
     }
   }
   
-  // Get icon for service category
   IconData getServiceCategoryIcon() {
     switch (_serviceCategory) {
       case 'House Cleaning':
@@ -362,7 +784,6 @@ class AuthService extends ChangeNotifier {
     }
   }
   
-  // Get color for service category
   Color getServiceCategoryColor() {
     switch (_serviceCategory) {
       case 'House Cleaning':
@@ -376,7 +797,6 @@ class AuthService extends ChangeNotifier {
     }
   }
 
-  // Update user profile
   Future<void> updateUserProfile({
     String? name,
     String? phone,
@@ -393,28 +813,25 @@ class AuthService extends ChangeNotifier {
       _userPhone = phone;
       await prefs.setString('userPhone', phone);
     }
-    if (email != null) {
-      await prefs.setString('userEmail', email);
-    }
     
-    // Update registered users
-    if (_registeredUsers.containsKey(_userPhone)) {
-      if (name != null) _registeredUsers[_userPhone!]?['name'] = name;
-      await _saveUserState();
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(_userId).update({
+        'name': name ?? _userName,
+        'phone': phone ?? _userPhone,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      print('❌ Failed to update user in Firestore: $e');
     }
     
     notifyListeners();
   }
   
-  // Get user email
   Future<String?> getUserEmail() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString('userEmail');
   }
 
-  // ==================== WASHER SPECIFIC METHODS (ADDED FOR COMPATIBILITY) ====================
-  
-  /// Get washer data (for backward compatibility with washer_dashboard)
   Future<Map<String, dynamic>> getWasherData() async {
     final prefs = await SharedPreferences.getInstance();
     return {
@@ -423,20 +840,78 @@ class AuthService extends ChangeNotifier {
       'bankName': prefs.getString('bank_name') ?? '',
       'accountNumber': prefs.getString('account_number') ?? '',
       'accountName': prefs.getString('account_name') ?? '',
-      'status': prefs.getString('washer_status') ?? 'pending',
+      'status': prefs.getString('washer_status') ?? 'approved',
     };
   }
 
-  /// Get washer status (for backward compatibility with washer_dashboard)
   Future<String> getWasherStatus() async {
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('washer_status') ?? 'pending';
+    return prefs.getString('washer_status') ?? 'approved';
   }
 
-  /// Set washer approved status
   Future<void> setWasherApproved(bool approved) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('washer_status', approved ? 'approved' : 'pending');
     notifyListeners();
+  }
+
+  Future<void> syncAllUsersToFirestore() async {
+    await _loadSavedUser();
+  }
+  
+  Future<String?> fetchUserRoleFromFirestore(String userId) async {
+    try {
+      final doc = await FirebaseFirestore.instance.collection('users').doc(userId).get();
+      if (doc.exists) {
+        return doc.data()?['role'];
+      }
+      return null;
+    } catch (e) {
+      print('❌ Error fetching user role: $e');
+      return null;
+    }
+  }
+  
+  Future<bool> isUserWasherInFirestore(String userId) async {
+    try {
+      final doc = await FirebaseFirestore.instance.collection('washers').doc(userId).get();
+      if (doc.exists) {
+        return doc.data()?['role'] == 'washer' || doc.data()?['role'] == 'cleaner';
+      }
+      return false;
+    } catch (e) {
+      print('❌ Error checking washer status: $e');
+      return false;
+    }
+  }
+  
+  Future<String?> getWasherIdFromFirestore(String userId) async {
+    try {
+      final querySnapshot = await FirebaseFirestore.instance
+          .collection('washers')
+          .where('userId', isEqualTo: userId)
+          .limit(1)
+          .get();
+      
+      if (querySnapshot.docs.isNotEmpty) {
+        return querySnapshot.docs.first.id;
+      }
+      return null;
+    } catch (e) {
+      print('❌ Error getting washer ID: $e');
+      return null;
+    }
+  }
+  
+  Future<void> updateUserRoleInFirestore(String userId, String role) async {
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(userId).update({
+        'role': role,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      print('✅ User role updated to $role in Firestore');
+    } catch (e) {
+      print('❌ Error updating user role: $e');
+    }
   }
 }

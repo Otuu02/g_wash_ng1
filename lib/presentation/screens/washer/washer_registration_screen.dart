@@ -1,7 +1,10 @@
-// FILE: lib/presentation/screens/washer/washer_registration_screen.dart
-// PURPOSE: Complete washer registration form
+// lib/presentation/screens/washer/washer_registration_screen.dart
+// PURPOSE: Complete washer registration form with Firebase integration
+// FIXED: Uses AuthService userId instead of FirebaseAuth.currentUser
+// FIXED: Navigation clears stack and goes to Washer Dashboard
 
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../services/auth_service.dart';
@@ -23,34 +26,55 @@ class _WasherRegistrationScreenState extends State<WasherRegistrationScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
-  final _bankNameController = TextEditingController();
   final _accountNumberController = TextEditingController();
   final _accountNameController = TextEditingController();
+  final _cityController = TextEditingController();
+  final _stateController = TextEditingController();
   
-  // Selected values
+  // Service Type Selection
+  final List<Map<String, dynamic>> _availableServices = [
+    {'id': 'car_wash', 'name': 'Car Washer', 'icon': Icons.local_car_wash, 'category': 'Car Wash'},
+    {'id': 'cleaning', 'name': 'Cleaner', 'icon': Icons.cleaning_services, 'category': 'House Cleaning'},
+    {'id': 'laundry', 'name': 'Laundry', 'icon': Icons.local_laundry_service, 'category': 'Laundry'},
+  ];
+  
+  List<String> _selectedServices = [];
   String _selectedVehicleType = 'Motorcycle';
   double _workingRadius = 10;
   String _selectedBank = 'Access Bank';
   
-  // State
   bool _isLoading = false;
   bool _obscurePassword = true;
   bool _agreeToTerms = false;
   
-  final List<String> _vehicleTypes = ['Motorcycle', 'Car', 'Van', 'Truck', 'SUV'];
+  final List<String> _vehicleTypes = ['Motorcycle', 'Car', 'Van', 'Truck', 'SUV', 'Bicycle'];
   final List<String> _banks = [
     'Access Bank', 'GTBank', 'First Bank', 'UBA', 'Zenith Bank',
-    'Union Bank', 'Fidelity Bank', 'Ecobank', 'Stanbic IBTC', 'Polaris Bank'
+    'Union Bank', 'Fidelity Bank', 'Ecobank', 'Stanbic IBTC', 'Polaris Bank',
+    'Sterling Bank', 'Wema Bank', 'Heritage Bank', 'Keystone Bank'
   ];
 
+  void _toggleService(String serviceId) {
+    setState(() {
+      if (_selectedServices.contains(serviceId)) {
+        _selectedServices.remove(serviceId);
+      } else {
+        _selectedServices.add(serviceId);
+      }
+    });
+  }
+
   Future<void> _registerWasher() async {
-    // Validate form
     if (!_formKey.currentState!.validate()) {
       _showError('Please fill all required fields');
       return;
     }
     
-    // Check terms agreement
+    if (_selectedServices.isEmpty) {
+      _showError('Please select at least one service type');
+      return;
+    }
+    
     if (!_agreeToTerms) {
       _showError('Please agree to the terms and conditions');
       return;
@@ -74,43 +98,95 @@ class _WasherRegistrationScreenState extends State<WasherRegistrationScreen> {
         return;
       }
       
-      // Step 2: Save washer specific data
+      // Step 2: Get userId from AuthService (NOT FirebaseAuth)
       final userId = authService.getCurrentUserId();
       if (userId == null) {
-        _showError('User ID not found. Please try again.');
+        _showError('User not found. Please try again.');
         setState(() => _isLoading = false);
         return;
       }
+
+      print('✅ User ID from AuthService: $userId');
+
+      // Build service categories list
+      List<String> serviceCategories = [];
+      for (var service in _availableServices) {
+        if (_selectedServices.contains(service['id'])) {
+          serviceCategories.add(service['category']);
+        }
+      }
+
+      // Save washer data to WASHERS collection
+      final washerData = {
+        'userId': userId,
+        'name': _nameController.text.trim(),
+        'phone': _phoneController.text.trim(),
+        'email': _emailController.text.trim(),
+        'city': _cityController.text.trim(),
+        'state': _stateController.text.trim(),
+        'selectedServices': _selectedServices,
+        'serviceCategories': serviceCategories,
+        'vehicleType': _selectedVehicleType,
+        'workingRadius': _workingRadius.toInt(),
+        'bankName': _selectedBank,
+        'accountNumber': _accountNumberController.text.trim(),
+        'accountName': _accountNameController.text.trim(),
+        'isOnline': true,
+        'approved': true,
+        'rating': 0.0,
+        'totalJobs': 0,
+        'totalEarnings': 0,
+        'pendingJobs': 0,
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+
+      final washerRef = await FirebaseFirestore.instance
+          .collection('washers')
+          .add(washerData);
+
+      print('✅ Washer saved to Firestore with ID: ${washerRef.id}');
       
-      await authService.saveWasherData(
-        uid: userId,
-        vehicleType: _selectedVehicleType,
-        workingRadius: _workingRadius.toInt(),
-        bankName: _selectedBank,
-        accountNumber: _accountNumberController.text.trim(),
-        accountName: _accountNameController.text.trim(),
-      );
+      // Update user role in users collection
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(userId)
+          .update({
+        'role': 'washer',
+        'washerId': washerRef.id,
+        'serviceCategories': serviceCategories,
+        'selectedServices': _selectedServices,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      print('✅ User role updated to "washer" in users collection');
       
-      // Step 3: Force a reload of user data to ensure status is saved
+      // Reload AuthService and refresh from Firestore
       await authService.reloadUserData();
+      await authService.refreshUserData();
       
-      // Show success message
+      // Small delay to ensure state is updated
+      await Future.delayed(const Duration(milliseconds: 500));
+      
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Registration submitted! Awaiting admin approval.'),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 3),
+            content: Text('✅ Washer account created! You are now online.'),
+            backgroundColor: AppColors.success,
+            duration: Duration(seconds: 2),
           ),
         );
         
-        // Navigate to dashboard (will show pending screen)
-        Navigator.pushReplacement(
-          context,
+        // ============================================================
+        // FIXED: Clear the entire navigation stack and go to Washer Dashboard
+        // ============================================================
+        Navigator.of(context).pushAndRemoveUntil(
           MaterialPageRoute(builder: (context) => const WasherDashboard()),
+          (Route<dynamic> route) => false,
         );
       }
     } catch (e) {
+      print('❌ Registration error: $e');
       _showError(e.toString());
       setState(() => _isLoading = false);
     }
@@ -118,7 +194,11 @@ class _WasherRegistrationScreenState extends State<WasherRegistrationScreen> {
 
   void _showError(String message) {
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: Colors.red),
+      SnackBar(
+        content: Text(message),
+        backgroundColor: AppColors.error,
+        duration: const Duration(seconds: 3),
+      ),
     );
   }
 
@@ -128,19 +208,31 @@ class _WasherRegistrationScreenState extends State<WasherRegistrationScreen> {
       backgroundColor: Colors.white,
       appBar: AppBar(
         title: const Text(
-          'Become a Washer',
-          style: TextStyle(fontWeight: FontWeight.bold),
+          'Become a Service Provider',
+          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
         ),
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         elevation: 0,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.pop(context),
         ),
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: AppColors.primary))
+          ? const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(color: AppColors.primary),
+                  SizedBox(height: 16),
+                  Text(
+                    'Creating your account...',
+                    style: TextStyle(color: AppColors.grey600),
+                  ),
+                ],
+              ),
+            )
           : SingleChildScrollView(
               padding: const EdgeInsets.all(20),
               child: Form(
@@ -155,11 +247,11 @@ class _WasherRegistrationScreenState extends State<WasherRegistrationScreen> {
                           Icon(Icons.emoji_transportation, size: 60, color: AppColors.primary),
                           SizedBox(height: 8),
                           Text(
-                            'Join Our Washer Network',
+                            'Join Our Network',
                             style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                           ),
                           Text(
-                            'Start earning by washing cars',
+                            'Start earning by providing services',
                             style: TextStyle(color: Colors.grey),
                           ),
                         ],
@@ -167,7 +259,60 @@ class _WasherRegistrationScreenState extends State<WasherRegistrationScreen> {
                     ),
                     const SizedBox(height: 32),
                     
-                    // Personal Information Section
+                    // Service Type Selection
+                    const Text(
+                      'Select Services (Choose one or more)',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.primary),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'You will receive jobs for all selected services',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: _availableServices.map((service) {
+                        final isSelected = _selectedServices.contains(service['id']);
+                        return Expanded(
+                          child: GestureDetector(
+                            onTap: () => _toggleService(service['id']),
+                            child: Container(
+                              margin: const EdgeInsets.symmetric(horizontal: 4),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              decoration: BoxDecoration(
+                                color: isSelected ? AppColors.primary.withOpacity(0.15) : Colors.grey.shade100,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: isSelected ? AppColors.primary : Colors.grey.shade300,
+                                  width: isSelected ? 2 : 1,
+                                ),
+                              ),
+                              child: Column(
+                                children: [
+                                  Icon(service['icon'], 
+                                      color: isSelected ? AppColors.primary : Colors.grey.shade600,
+                                      size: 28),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    service['name'],
+                                    style: TextStyle(
+                                      color: isSelected ? AppColors.primary : Colors.grey.shade600,
+                                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                      fontSize: 11,
+                                    ),
+                                  ),
+                                  if (isSelected)
+                                    const Icon(Icons.check_circle, size: 14, color: Colors.green),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 24),
+                    
+                    // Personal Information
                     const Text(
                       'Personal Information',
                       style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.primary),
@@ -177,9 +322,12 @@ class _WasherRegistrationScreenState extends State<WasherRegistrationScreen> {
                     TextFormField(
                       controller: _nameController,
                       decoration: const InputDecoration(
-                        labelText: 'Full Name',
-                        prefixIcon: Icon(Icons.person),
+                        labelText: 'Full Name *',
+                        prefixIcon: Icon(Icons.person, color: AppColors.primary),
                         border: OutlineInputBorder(),
+                        focusedBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: AppColors.primary, width: 2),
+                        ),
                       ),
                       validator: (value) => value == null || value.isEmpty ? 'Enter your name' : null,
                     ),
@@ -189,10 +337,13 @@ class _WasherRegistrationScreenState extends State<WasherRegistrationScreen> {
                       controller: _phoneController,
                       keyboardType: TextInputType.phone,
                       decoration: const InputDecoration(
-                        labelText: 'Phone Number',
+                        labelText: 'Phone Number *',
                         prefixText: '+234 ',
-                        prefixIcon: Icon(Icons.phone),
+                        prefixIcon: Icon(Icons.phone, color: AppColors.primary),
                         border: OutlineInputBorder(),
+                        focusedBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: AppColors.primary, width: 2),
+                        ),
                       ),
                       validator: (value) => value == null || value.isEmpty ? 'Enter phone number' : null,
                     ),
@@ -202,11 +353,49 @@ class _WasherRegistrationScreenState extends State<WasherRegistrationScreen> {
                       controller: _emailController,
                       keyboardType: TextInputType.emailAddress,
                       decoration: const InputDecoration(
-                        labelText: 'Email Address',
-                        prefixIcon: Icon(Icons.email),
+                        labelText: 'Email Address *',
+                        prefixIcon: Icon(Icons.email, color: AppColors.primary),
                         border: OutlineInputBorder(),
+                        focusedBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: AppColors.primary, width: 2),
+                        ),
                       ),
                       validator: (value) => value == null || value.isEmpty ? 'Enter email' : null,
+                    ),
+                    const SizedBox(height: 12),
+                    
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _cityController,
+                            decoration: const InputDecoration(
+                              labelText: 'City *',
+                              prefixIcon: Icon(Icons.location_city, color: AppColors.primary),
+                              border: OutlineInputBorder(),
+                              focusedBorder: OutlineInputBorder(
+                                borderSide: BorderSide(color: AppColors.primary, width: 2),
+                              ),
+                            ),
+                            validator: (value) => value == null || value.isEmpty ? 'Enter city' : null,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextFormField(
+                            controller: _stateController,
+                            decoration: const InputDecoration(
+                              labelText: 'State *',
+                              prefixIcon: Icon(Icons.map, color: AppColors.primary),
+                              border: OutlineInputBorder(),
+                              focusedBorder: OutlineInputBorder(
+                                borderSide: BorderSide(color: AppColors.primary, width: 2),
+                              ),
+                            ),
+                            validator: (value) => value == null || value.isEmpty ? 'Enter state' : null,
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 12),
                     
@@ -214,13 +403,16 @@ class _WasherRegistrationScreenState extends State<WasherRegistrationScreen> {
                       controller: _passwordController,
                       obscureText: _obscurePassword,
                       decoration: InputDecoration(
-                        labelText: 'Password',
-                        prefixIcon: const Icon(Icons.lock),
+                        labelText: 'Password *',
+                        prefixIcon: const Icon(Icons.lock, color: AppColors.primary),
                         suffixIcon: IconButton(
                           icon: Icon(_obscurePassword ? Icons.visibility_off : Icons.visibility),
                           onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
                         ),
                         border: const OutlineInputBorder(),
+                        focusedBorder: const OutlineInputBorder(
+                          borderSide: BorderSide(color: AppColors.primary, width: 2),
+                        ),
                       ),
                       validator: (value) {
                         if (value == null || value.isEmpty) return 'Enter password';
@@ -234,9 +426,12 @@ class _WasherRegistrationScreenState extends State<WasherRegistrationScreen> {
                       controller: _confirmPasswordController,
                       obscureText: true,
                       decoration: const InputDecoration(
-                        labelText: 'Confirm Password',
-                        prefixIcon: Icon(Icons.lock),
+                        labelText: 'Confirm Password *',
+                        prefixIcon: Icon(Icons.lock_outline, color: AppColors.primary),
                         border: OutlineInputBorder(),
+                        focusedBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: AppColors.primary, width: 2),
+                        ),
                       ),
                       validator: (value) {
                         if (value != _passwordController.text) return 'Passwords do not match';
@@ -245,7 +440,7 @@ class _WasherRegistrationScreenState extends State<WasherRegistrationScreen> {
                     ),
                     const SizedBox(height: 24),
                     
-                    // Vehicle Information Section
+                    // Vehicle Information
                     const Text(
                       'Vehicle Information',
                       style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.primary),
@@ -255,15 +450,19 @@ class _WasherRegistrationScreenState extends State<WasherRegistrationScreen> {
                     DropdownButtonFormField(
                       value: _selectedVehicleType,
                       decoration: const InputDecoration(
-                        labelText: 'Vehicle Type',
-                        prefixIcon: Icon(Icons.directions_car),
+                        labelText: 'Vehicle Type *',
+                        prefixIcon: Icon(Icons.directions_car, color: AppColors.primary),
                         border: OutlineInputBorder(),
+                        focusedBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: AppColors.primary, width: 2),
+                        ),
                       ),
                       items: _vehicleTypes.map((type) => DropdownMenuItem(
                         value: type,
                         child: Text(type),
                       )).toList(),
                       onChanged: (value) => setState(() => _selectedVehicleType = value!),
+                      validator: (value) => value == null ? 'Select vehicle type' : null,
                     ),
                     const SizedBox(height: 16),
                     
@@ -290,7 +489,7 @@ class _WasherRegistrationScreenState extends State<WasherRegistrationScreen> {
                     ),
                     const SizedBox(height: 24),
                     
-                    // Bank Information Section
+                    // Bank Information
                     const Text(
                       'Bank Information',
                       style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.primary),
@@ -300,15 +499,19 @@ class _WasherRegistrationScreenState extends State<WasherRegistrationScreen> {
                     DropdownButtonFormField(
                       value: _selectedBank,
                       decoration: const InputDecoration(
-                        labelText: 'Select Bank',
-                        prefixIcon: Icon(Icons.account_balance),
+                        labelText: 'Select Bank *',
+                        prefixIcon: Icon(Icons.account_balance, color: AppColors.primary),
                         border: OutlineInputBorder(),
+                        focusedBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: AppColors.primary, width: 2),
+                        ),
                       ),
                       items: _banks.map((bank) => DropdownMenuItem(
                         value: bank,
                         child: Text(bank),
                       )).toList(),
                       onChanged: (value) => setState(() => _selectedBank = value!),
+                      validator: (value) => value == null ? 'Select bank' : null,
                     ),
                     const SizedBox(height: 12),
                     
@@ -316,9 +519,12 @@ class _WasherRegistrationScreenState extends State<WasherRegistrationScreen> {
                       controller: _accountNumberController,
                       keyboardType: TextInputType.number,
                       decoration: const InputDecoration(
-                        labelText: 'Account Number',
-                        prefixIcon: Icon(Icons.numbers),
+                        labelText: 'Account Number *',
+                        prefixIcon: Icon(Icons.numbers, color: AppColors.primary),
                         border: OutlineInputBorder(),
+                        focusedBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: AppColors.primary, width: 2),
+                        ),
                       ),
                       validator: (value) => value == null || value.isEmpty ? 'Enter account number' : null,
                     ),
@@ -327,15 +533,18 @@ class _WasherRegistrationScreenState extends State<WasherRegistrationScreen> {
                     TextFormField(
                       controller: _accountNameController,
                       decoration: const InputDecoration(
-                        labelText: 'Account Name',
-                        prefixIcon: Icon(Icons.person),
+                        labelText: 'Account Name *',
+                        prefixIcon: Icon(Icons.person_outline, color: AppColors.primary),
                         border: OutlineInputBorder(),
+                        focusedBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: AppColors.primary, width: 2),
+                        ),
                       ),
                       validator: (value) => value == null || value.isEmpty ? 'Enter account name' : null,
                     ),
                     const SizedBox(height: 24),
                     
-                    // Terms and Conditions
+                    // Terms
                     Row(
                       children: [
                         Checkbox(
@@ -345,7 +554,7 @@ class _WasherRegistrationScreenState extends State<WasherRegistrationScreen> {
                         ),
                         Expanded(
                           child: GestureDetector(
-                            onTap: () => _showTermsDialog(),
+                            onTap: _showTermsDialog,
                             child: const Text(
                               'I agree to the Terms of Service and Privacy Policy',
                               style: TextStyle(color: AppColors.primary),
@@ -363,9 +572,18 @@ class _WasherRegistrationScreenState extends State<WasherRegistrationScreen> {
                       height: 55,
                       child: ElevatedButton(
                         onPressed: _registerWasher,
-                        child: const Text(
-                          'Submit Application',
-                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: Text(
+                          _selectedServices.isEmpty 
+                              ? 'Select a Service First'
+                              : 'Create Account',
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                         ),
                       ),
                     ),
@@ -376,17 +594,22 @@ class _WasherRegistrationScreenState extends State<WasherRegistrationScreen> {
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors.blue.shade50,
+                        color: Colors.green.shade50,
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Row(
                         children: [
-                          Icon(Icons.info_outline, color: Colors.blue.shade700),
+                          Icon(Icons.check_circle, color: Colors.green.shade700),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'Your application will be reviewed by admin within 24-48 hours.',
-                              style: TextStyle(color: Colors.blue.shade700, fontSize: 12),
+                              _selectedServices.isEmpty
+                                  ? 'Please select at least one service to get started'
+                                  : 'Your account will be activated immediately',
+                              style: TextStyle(
+                                color: _selectedServices.isEmpty ? Colors.orange.shade700 : Colors.green.shade700,
+                                fontSize: 12,
+                              ),
                             ),
                           ),
                         ],
@@ -404,26 +627,42 @@ class _WasherRegistrationScreenState extends State<WasherRegistrationScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Terms of Service'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          'Terms of Service',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         content: const SingleChildScrollView(
-          child: Text(
-            'G Wash NG Washer Terms\n\n'
-            '1. You must be at least 18 years old\n'
-            '2. You must have a valid driver\'s license\n'
-            '3. You agree to a background check\n'
-            '4. 15% commission on each job\n'
-            '5. You must maintain 4.0+ rating\n'
-            '6. Cancellation policy applies\n'
-            '7. Payments are processed weekly\n'
-            '8. You are an independent contractor\n'
-            '9. G Wash NG reserves the right to suspend accounts\n\n'
-            'By registering, you agree to all terms.',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'G Wash NG Terms\n\n',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              Text(
+                '1. You must be at least 18 years old\n'
+                '2. You must have a valid means of transport\n'
+                '3. You agree to a background check\n'
+                '4. 15% commission on each job\n'
+                '5. You must maintain 4.0+ rating\n'
+                '6. Cancellation policy applies\n'
+                '7. Payments are processed weekly\n'
+                '8. You are an independent contractor\n'
+                '9. G Wash NG reserves the right to suspend accounts\n\n'
+                'By registering, you agree to all terms.',
+                style: TextStyle(fontSize: 14),
+              ),
+            ],
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
+            child: const Text(
+              'Close',
+              style: TextStyle(color: AppColors.primary),
+            ),
           ),
         ],
       ),

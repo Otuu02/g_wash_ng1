@@ -1,9 +1,11 @@
 // FILE: lib/presentation/screens/washer/washer_dashboard.dart
-// PURPOSE: Main dashboard for washers - online/offline toggle, earnings, job requests
-// Now shows pending approval screen until admin approves
+// PURPOSE: Main dashboard for washers - shows services, earnings, and job requests
+// UPDATED: All features working with real data from Firestore
 
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
+import 'package:intl/intl.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../services/auth_service.dart';
 import 'job_request_screen.dart';
@@ -25,55 +27,196 @@ class _WasherDashboardState extends State<WasherDashboard> {
   bool _isLoading = true;
   bool _hasApplied = false;
   String _washerStatus = 'pending';
+  String _washerId = '';
   
-  // Demo data - in production, fetch from backend
-  final Map<String, dynamic> _washerStats = {
-    'todayEarnings': 12500,
-    'totalJobs': 47,
-    'rating': 4.8,
-    'totalEarnings': 245000,
-    'pendingJobs': 3,
+  // ============================================================
+  // ADDED: _washerData to store all washer data
+  // ============================================================
+  Map<String, dynamic> _washerData = {};
+  
+  // Selected services
+  List<Map<String, dynamic>> _selectedServices = [];
+  
+  // Real data from Firestore
+  Map<String, dynamic> _washerStats = {
+    'todayEarnings': 0,
+    'totalJobs': 0,
+    'rating': 0.0,
+    'totalEarnings': 0,
+    'pendingJobs': 0,
+  };
+
+  // Service icons and colors mapping
+  final Map<String, Map<String, dynamic>> _serviceDetails = {
+    'Car Wash': {
+      'icon': Icons.local_car_wash,
+      'color': const Color(0xFF0CAF60),
+      'bgColor': Color(0xFF0CAF60).withOpacity(0.1),
+    },
+    'House Cleaning': {
+      'icon': Icons.cleaning_services,
+      'color': Colors.blue,
+      'bgColor': Colors.blue.withOpacity(0.1),
+    },
+    'Laundry': {
+      'icon': Icons.local_laundry_service,
+      'color': const Color(0xFF9C27B0),
+      'bgColor': const Color(0xFF9C27B0).withOpacity(0.1),
+    },
   };
 
   @override
   void initState() {
     super.initState();
-    _checkApprovalStatus();
+    _loadWasherData();
   }
 
-  Future<void> _checkApprovalStatus() async {
-    final authService = Provider.of<AuthService>(context, listen: false);
+  Future<void> _loadWasherData() async {
+    setState(() => _isLoading = true);
     
     try {
-      // Try to get washer data - if fails, user hasn't applied
-      Map<String, dynamic> washerData;
-      String status;
+      final authService = Provider.of<AuthService>(context, listen: false);
+      final userId = authService.getCurrentUserId();
       
-      try {
-        washerData = await authService.getWasherData();
-        status = await authService.getWasherStatus();
-      } catch (e) {
-        // If methods don't exist or fail, use defaults for demo
-        washerData = {'status': null};
-        status = 'pending';
+      if (userId == null) {
+        print('❌ No user ID found in AuthService');
+        setState(() {
+          _isLoading = false;
+          _hasApplied = false;
+        });
+        return;
+      }
+
+      print('✅ Loading washer data for user ID: $userId');
+
+      final washerQuery = await FirebaseFirestore.instance
+          .collection('washers')
+          .where('userId', isEqualTo: userId)
+          .limit(1)
+          .get();
+
+      if (washerQuery.docs.isEmpty) {
+        print('❌ No washer found for user ID: $userId');
+        setState(() {
+          _isLoading = false;
+          _hasApplied = false;
+        });
+        return;
+      }
+
+      final doc = washerQuery.docs.first;
+      final data = doc.data();
+      _washerId = doc.id;
+      
+      // ============================================================
+      // STORE ALL WASHER DATA
+      // ============================================================
+      _washerData = data;
+      
+      // Build selected services list
+      List<String> serviceCategories = List<String>.from(data['serviceCategories'] ?? []);
+      List<Map<String, dynamic>> services = [];
+      for (var category in serviceCategories) {
+        if (_serviceDetails.containsKey(category)) {
+          services.add({
+            'name': category,
+            'icon': _serviceDetails[category]!['icon'],
+            'color': _serviceDetails[category]!['color'],
+            'bgColor': _serviceDetails[category]!['bgColor'],
+          });
+        }
       }
       
-      final hasApplied = washerData['status'] != null || 
-                         washerData['vehicleType'] != null && washerData['vehicleType'].isNotEmpty;
-      
-      setState(() {
-        _hasApplied = hasApplied;
-        _washerStatus = status;
-        _isApproved = status == 'approved';
-        _isLoading = false;
-      });
-    } catch (e) {
-      // Fallback for demo - show dashboard directly
       setState(() {
         _hasApplied = true;
-        _isApproved = true;
+        _isApproved = data['approved'] ?? false;
+        _washerStatus = _isApproved ? 'approved' : 'pending';
+        _isOnline = data['isOnline'] ?? false;
+        _selectedServices = services;
+        _washerStats = {
+          'todayEarnings': data['todayEarnings'] ?? 0,
+          'totalJobs': data['totalJobs'] ?? 0,
+          'rating': data['rating'] ?? 0.0,
+          'totalEarnings': data['totalEarnings'] ?? 0,
+          'pendingJobs': data['pendingJobs'] ?? 0,
+        };
         _isLoading = false;
       });
+
+      print('✅ Washer data loaded: $_washerId');
+
+      // Listen to real-time updates
+      FirebaseFirestore.instance
+          .collection('washers')
+          .doc(_washerId)
+          .snapshots()
+          .listen((snapshot) {
+        if (snapshot.exists) {
+          final newData = snapshot.data()!;
+          _washerData = newData; // Update stored data
+          
+          List<String> newCategories = List<String>.from(newData['serviceCategories'] ?? []);
+          List<Map<String, dynamic>> newServices = [];
+          for (var category in newCategories) {
+            if (_serviceDetails.containsKey(category)) {
+              newServices.add({
+                'name': category,
+                'icon': _serviceDetails[category]!['icon'],
+                'color': _serviceDetails[category]!['color'],
+                'bgColor': _serviceDetails[category]!['bgColor'],
+              });
+            }
+          }
+          
+          setState(() {
+            _isOnline = newData['isOnline'] ?? false;
+            _isApproved = newData['approved'] ?? false;
+            _selectedServices = newServices;
+            _washerStats = {
+              'todayEarnings': newData['todayEarnings'] ?? 0,
+              'totalJobs': newData['totalJobs'] ?? 0,
+              'rating': newData['rating'] ?? 0.0,
+              'totalEarnings': newData['totalEarnings'] ?? 0,
+              'pendingJobs': newData['pendingJobs'] ?? 0,
+            };
+          });
+        }
+      });
+
+    } catch (e) {
+      print('❌ Error loading washer data: $e');
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _toggleOnlineStatus(bool value) async {
+    setState(() => _isOnline = value);
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('washers')
+          .doc(_washerId)
+          .update({
+        'isOnline': value,
+        'lastOnlineUpdate': FieldValue.serverTimestamp(),
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(value ? '✅ You are now online' : 'You are now offline'),
+          backgroundColor: value ? AppColors.success : AppColors.error,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } catch (e) {
+      print('❌ Error updating online status: $e');
+      setState(() => _isOnline = !value);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error updating status: $e'),
+          backgroundColor: AppColors.error,
+        ),
+      );
     }
   }
 
@@ -81,6 +224,29 @@ class _WasherDashboardState extends State<WasherDashboard> {
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(builder: (context) => const WasherRegistrationScreen()),
+    );
+  }
+
+  void _showInfoDialog(String title, String content) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          title,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        content: Text(content),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text(
+              'Close',
+              style: TextStyle(color: AppColors.primary),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -95,17 +261,14 @@ class _WasherDashboardState extends State<WasherDashboard> {
       );
     }
 
-    // Show registration screen if user hasn't applied
     if (!_hasApplied) {
       return _buildApplyScreen();
     }
 
-    // Show pending approval screen if not approved
     if (!_isApproved) {
       return _buildPendingApprovalScreen();
     }
 
-    // Show full dashboard if approved
     return Scaffold(
       backgroundColor: Colors.grey.shade50,
       appBar: AppBar(
@@ -117,6 +280,10 @@ class _WasherDashboardState extends State<WasherDashboard> {
         foregroundColor: Colors.white,
         elevation: 0,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loadWasherData,
+          ),
           IconButton(
             icon: const Icon(Icons.person_outline),
             onPressed: () => setState(() => _currentIndex = 2),
@@ -334,193 +501,257 @@ class _WasherDashboardState extends State<WasherDashboard> {
   }
 
   Widget _buildHomeTab(String washerName) {
-    return SingleChildScrollView(  // ← FIXED: Was "SingleChildScrollUp" (typo)
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Welcome Card
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              gradient: AppColors.primaryGradient,
-              borderRadius: BorderRadius.circular(20),
+    return RefreshIndicator(
+      onRefresh: _loadWasherData,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Welcome Card
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [AppColors.primary, AppColors.primaryDark],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Hello,',
+                    style: TextStyle(color: Colors.white70, fontSize: 14),
+                  ),
+                  Text(
+                    washerName,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Ready to work today?',
+                    style: TextStyle(color: Colors.white70),
+                  ),
+                  const SizedBox(height: 20),
+                  // Online/Offline Toggle
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(30),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              _isOnline ? Icons.wifi : Icons.wifi_off,
+                              color: _isOnline ? Colors.green : Colors.red,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              _isOnline ? 'Online' : 'Offline',
+                              style: TextStyle(
+                                color: _isOnline ? Colors.green : Colors.red,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Switch(
+                          value: _isOnline,
+                          onChanged: _toggleOnlineStatus,
+                          activeColor: Colors.green,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Hello,',
-                  style: TextStyle(color: Colors.white70, fontSize: 14),
-                ),
-                Text(
-                  washerName,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                const Text(
-                  'Ready to work today?',
-                  style: TextStyle(color: Colors.white70),
-                ),
-                const SizedBox(height: 20),
-                // Online/Offline Toggle
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(30),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
+            const SizedBox(height: 16),
+
+            // Services Section
+            if (_selectedServices.isNotEmpty) ...[
+              const Text(
+                'Your Services',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 60,
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _selectedServices.length,
+                  itemBuilder: (context, index) {
+                    final service = _selectedServices[index];
+                    return Container(
+                      margin: const EdgeInsets.only(right: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: service['bgColor'],
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: service['color'],
+                          width: 1.5,
+                        ),
+                      ),
+                      child: Row(
                         children: [
                           Icon(
-                            _isOnline ? Icons.wifi : Icons.wifi_off,
-                            color: _isOnline ? Colors.green : Colors.red,
+                            service['icon'],
+                            color: service['color'],
                             size: 20,
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            _isOnline ? 'Online' : 'Offline',
+                            service['name'],
                             style: TextStyle(
-                              color: _isOnline ? Colors.green : Colors.red,
-                              fontWeight: FontWeight.bold,
+                              color: service['color'],
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
                             ),
                           ),
                         ],
                       ),
-                      Switch(
-                        value: _isOnline,
-                        onChanged: (value) {
-                          setState(() => _isOnline = value);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(value ? 'You are now online' : 'You are now offline'),
-                              backgroundColor: value ? Colors.green : Colors.red,
-                              duration: const Duration(seconds: 2),
-                            ),
-                          );
-                        },
-                        activeColor: Colors.green,
-                      ),
-                    ],
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 16),
+            ],
+
+            // Stats Cards - REAL DATA
+            Row(
+              children: [
+                Expanded(
+                  child: _buildStatCard(
+                    'Today\'s Earnings',
+                    '₦${NumberFormat('#,###').format(_washerStats['todayEarnings'])}',
+                    Icons.money,
+                    AppColors.primary,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildStatCard(
+                    'Total Jobs',
+                    '${_washerStats['totalJobs']}',
+                    Icons.work,
+                    Colors.blue,
                   ),
                 ),
               ],
             ),
-          ),
-          const SizedBox(height: 20),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildStatCard(
+                    'Rating',
+                    '${_washerStats['rating'].toStringAsFixed(1)} ★',
+                    Icons.star,
+                    Colors.amber,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildStatCard(
+                    'Pending Jobs',
+                    '${_washerStats['pendingJobs']}',
+                    Icons.pending,
+                    Colors.orange,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
 
-          // Stats Cards
-          Row(
-            children: [
-              Expanded(
-                child: _buildStatCard(
-                  'Today\'s Earnings',
-                  '₦${_washerStats['todayEarnings']}',
-                  Icons.money,
-                  AppColors.primary,
+            // Quick Actions - ALL WORKING
+            const Text(
+              'Quick Actions',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildActionCard(
+                    'View Earnings',
+                    Icons.money,
+                    Colors.green,
+                    () => setState(() => _currentIndex = 1),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _buildStatCard(
-                  'Total Jobs',
-                  '${_washerStats['totalJobs']}',
-                  Icons.work,
-                  Colors.blue,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildActionCard(
+                    'My Profile',
+                    Icons.person,
+                    Colors.blue,
+                    () => setState(() => _currentIndex = 2),
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _buildStatCard(
-                  'Rating',
-                  '${_washerStats['rating']} ★',
-                  Icons.star,
-                  Colors.amber,
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildActionCard(
+                    'Subscription Info',
+                    Icons.subscriptions,
+                    Colors.purple,
+                    () {
+                      final subValid = _washerData['subscriptionValidUntil'];
+                      if (subValid != null) {
+                        final date = (subValid as Timestamp).toDate();
+                        _showInfoDialog(
+                          'Subscription Status',
+                          'Subscription valid until: ${DateFormat('MMM dd, yyyy').format(date)}',
+                        );
+                      } else {
+                        _showInfoDialog('Subscription', 'No active subscription');
+                      }
+                    },
+                  ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _buildStatCard(
-                  'Pending Jobs',
-                  '${_washerStats['pendingJobs']}',
-                  Icons.pending,
-                  Colors.orange,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: _buildActionCard(
+                    'Support',
+                    Icons.support_agent,
+                    Colors.orange,
+                    () {
+                      _showInfoDialog(
+                        'Support',
+                        'Email: support@gwashng.com\nPhone: +234 800 000 0000\n\nAvailable 24/7',
+                      );
+                    },
+                  ),
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
+              ],
+            ),
+            const SizedBox(height: 20),
 
-          // Quick Actions
-          const Text(
-            'Quick Actions',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _buildActionCard(
-                  'View Earnings',
-                  Icons.money,
-                  Colors.green,
-                  () => setState(() => _currentIndex = 1),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _buildActionCard(
-                  'My Profile',
-                  Icons.person,
-                  Colors.blue,
-                  () => setState(() => _currentIndex = 2),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _buildActionCard(
-                  'Subscription',
-                  Icons.subscriptions,
-                  Colors.purple,
-                  () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Subscription managed by admin')),
-                    );
-                  },
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _buildActionCard(
-                  'Support',
-                  Icons.support_agent,
-                  Colors.orange,
-                  () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Contact support: support@gwashng.com')),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-        ],
+            // Recent Jobs - REAL DATA
+            const Text(
+              'Recent Jobs',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            _buildRecentJobs(),
+          ],
+        ),
       ),
     );
   }
@@ -583,6 +814,140 @@ class _WasherDashboardState extends State<WasherDashboard> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildRecentJobs() {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance
+          .collection('jobs')
+          .where('washerId', isEqualTo: _washerId)
+          .orderBy('createdAt', descending: true)
+          .limit(5)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Center(
+            child: Text('Error: ${snapshot.error}'),
+          );
+        }
+
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(16),
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
+
+        final jobs = snapshot.data?.docs ?? [];
+        
+        if (jobs.isEmpty) {
+          return Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Center(
+              child: Text(
+                'No jobs yet',
+                style: TextStyle(color: Colors.grey),
+              ),
+            ),
+          );
+        }
+
+        return ListView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: jobs.length,
+          itemBuilder: (context, index) {
+            final job = jobs[index].data() as Map<String, dynamic>;
+            final status = job['status'] ?? 'pending';
+            final statusColor = status == 'completed' ? Colors.green :
+                               status == 'assigned' ? Colors.blue :
+                               status == 'enRoute' ? Colors.orange :
+                               Colors.grey;
+            
+            return GestureDetector(
+              onTap: () {
+                _showInfoDialog(
+                  'Job Details',
+                  'Service: ${job['serviceName'] ?? 'N/A'}\n'
+                  'Price: ₦${NumberFormat('#,###').format(job['price'] ?? 0)}\n'
+                  'Location: ${job['location'] ?? 'N/A'}\n'
+                  'Status: $status\n'
+                  'Customer: ${job['customerName'] ?? 'N/A'}',
+                );
+              },
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.grey.withOpacity(0.05),
+                      blurRadius: 5,
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 4,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: statusColor,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            job['serviceName'] ?? 'Service',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Text(
+                            '₦${NumberFormat('#,###').format(job['price'] ?? 0)} · ${job['location'] ?? ''}',
+                            style: TextStyle(
+                              color: Colors.grey.shade600,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: statusColor.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Text(
+                        status.toUpperCase(),
+                        style: TextStyle(
+                          color: statusColor,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 }

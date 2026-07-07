@@ -1,333 +1,482 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class JobService extends ChangeNotifier {
   static final JobService _instance = JobService._internal();
   factory JobService() => _instance;
   JobService._internal();
 
-  // Service Providers for different categories
-  final List<Map<String, dynamic>> _mockCarWashers = [
-    {
-      'id': 'CW001',
-      'name': 'John A.',
-      'rating': 4.8,
-      'phone': '+234 802 345 6789',
-      'latitude': 6.5244,
-      'longitude': 3.3792,
-      'isOnline': true,
-      'vehicle': 'Motorcycle',
-      'category': 'Car Wash',
-      'experience': '3 years',
-      'completedJobs': 245,
-    },
-    {
-      'id': 'CW002',
-      'name': 'Michael O.',
-      'rating': 4.9,
-      'phone': '+234 803 456 7890',
-      'latitude': 6.5344,
-      'longitude': 3.3892,
-      'isOnline': true,
-      'vehicle': 'Car',
-      'category': 'Car Wash',
-      'experience': '5 years',
-      'completedJobs': 389,
-    },
-    {
-      'id': 'CW003',
-      'name': 'David E.',
-      'rating': 4.7,
-      'phone': '+234 804 567 8901',
-      'latitude': 6.5144,
-      'longitude': 3.3692,
-      'isOnline': false,
-      'vehicle': 'Motorcycle',
-      'category': 'Car Wash',
-      'experience': '2 years',
-      'completedJobs': 156,
-    },
-  ];
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  // House Cleaning Providers
-  final List<Map<String, dynamic>> _mockHouseCleaners = [
-    {
-      'id': 'HC001',
-      'name': 'Blessing O.',
-      'rating': 4.9,
-      'phone': '+234 802 345 6789',
-      'latitude': 6.5244,
-      'longitude': 3.3792,
-      'isOnline': true,
-      'vehicle': 'Motorcycle',
-      'category': 'House Cleaning',
-      'experience': '4 years',
-      'completedJobs': 312,
-      'specialization': 'Deep Cleaning',
-    },
-    {
-      'id': 'HC002',
-      'name': 'Grace E.',
-      'rating': 5.0,
-      'phone': '+234 803 456 7890',
-      'latitude': 6.5344,
-      'longitude': 3.3892,
-      'isOnline': true,
-      'vehicle': 'Car',
-      'category': 'House Cleaning',
-      'experience': '6 years',
-      'completedJobs': 456,
-      'specialization': 'Move In/Out',
-    },
-    {
-      'id': 'HC003',
-      'name': 'Peace A.',
-      'rating': 4.8,
-      'phone': '+234 804 567 8901',
-      'latitude': 6.5144,
-      'longitude': 3.3692,
-      'isOnline': true,
-      'vehicle': 'Motorcycle',
-      'category': 'House Cleaning',
-      'experience': '3 years',
-      'completedJobs': 189,
-      'specialization': 'Office Cleaning',
-    },
-  ];
-
-  // Laundry Providers
-  final List<Map<String, dynamic>> _mockLaundryProviders = [
-    {
-      'id': 'LP001',
-      'name': 'FreshClean Laundry',
-      'rating': 4.8,
-      'phone': '+234 802 345 6789',
-      'latitude': 6.5244,
-      'longitude': 3.3792,
-      'isOnline': true,
-      'vehicle': 'Van',
-      'category': 'Laundry',
-      'experience': '5 years',
-      'completedJobs': 567,
-      'turnaround': '24 hours',
-    },
-    {
-      'id': 'LP002',
-      'name': 'QuickPress',
-      'rating': 4.7,
-      'phone': '+234 803 456 7890',
-      'latitude': 6.5344,
-      'longitude': 3.3892,
-      'isOnline': true,
-      'vehicle': 'Motorcycle',
-      'category': 'Laundry',
-      'experience': '3 years',
-      'completedJobs': 234,
-      'turnaround': '12 hours',
-    },
-    {
-      'id': 'LP003',
-      'name': 'Royal Dry Cleaners',
-      'rating': 4.9,
-      'phone': '+234 804 567 8901',
-      'latitude': 6.5144,
-      'longitude': 3.3692,
-      'isOnline': true,
-      'vehicle': 'Van',
-      'category': 'Laundry',
-      'experience': '7 years',
-      'completedJobs': 789,
-      'turnaround': '48 hours',
-    },
-  ];
-
-  List<Map<String, dynamic>> get _allProviders {
-    return [..._mockCarWashers, ..._mockHouseCleaners, ..._mockLaundryProviders];
-  }
-
-  // Find nearest provider based on category
-  Future<Map<String, dynamic>?> findNearestWasher(
-    double userLat, 
-    double userLng, {
-    String? category,
+  // ============================================================
+  // FIND NEAREST PROVIDER (Washer/Cleaner/Laundry)
+  // ============================================================
+  Future<Map<String, dynamic>?> findNearestProvider({
+    required double userLat,
+    required double userLng,
+    required String category,
+    double radiusKm = 10.0,
   }) async {
-    await Future.delayed(const Duration(milliseconds: 500));
-    
-    // Filter providers by category
-    List<Map<String, dynamic>> providers;
-    if (category != null) {
-      switch (category) {
-        case 'House Cleaning':
-          providers = _mockHouseCleaners.where((p) => p['isOnline'] == true).toList();
-          break;
-        case 'Laundry':
-          providers = _mockLaundryProviders.where((p) => p['isOnline'] == true).toList();
-          break;
-        default:
-          providers = _mockCarWashers.where((p) => p['isOnline'] == true).toList();
+    try {
+      // Query Firestore for approved and online providers
+      final snapshot = await _firestore
+          .collection('washers')
+          .where('approved', isEqualTo: true)
+          .where('isOnline', isEqualTo: true)
+          .where('serviceCategory', isEqualTo: category)
+          .get();
+
+      if (snapshot.docs.isEmpty) {
+        return null;
       }
-    } else {
-      providers = _allProviders.where((p) => p['isOnline'] == true).toList();
-    }
-    
-    if (providers.isEmpty) return null;
-    
-    // Sort by distance (simulated)
-    providers.sort((a, b) {
-      final distanceA = _calculateDistance(userLat, userLng, a['latitude'], a['longitude']);
-      final distanceB = _calculateDistance(userLat, userLng, b['latitude'], b['longitude']);
-      return distanceA.compareTo(distanceB);
-    });
-    
-    // Calculate ETA based on distance
-    final nearest = providers.first;
-    final distance = _calculateDistance(userLat, userLng, nearest['latitude'], nearest['longitude']);
-    final etaMinutes = _calculateETA(distance, nearest['vehicle']);
-    nearest['distance'] = distance;
-    nearest['eta'] = etaMinutes;
-    
-    return nearest;
-  }
 
-  // Get all providers by category
-  Future<List<Map<String, dynamic>>> getProvidersByCategory(String category) async {
-    await Future.delayed(const Duration(milliseconds: 300));
-    
-    switch (category) {
-      case 'House Cleaning':
-        return _mockHouseCleaners.where((p) => p['isOnline'] == true).toList();
-      case 'Laundry':
-        return _mockLaundryProviders.where((p) => p['isOnline'] == true).toList();
-      default:
-        return _mockCarWashers.where((p) => p['isOnline'] == true).toList();
+      // Calculate distances and sort
+      List<Map<String, dynamic>> providers = [];
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+        final lat = data['currentLat'] ?? data['latitude'] ?? 6.5244;
+        final lng = data['currentLng'] ?? data['longitude'] ?? 3.3792;
+        
+        final distance = _calculateDistance(userLat, userLng, lat, lng);
+        
+        if (distance <= radiusKm) {
+          providers.add({
+            'id': doc.id,
+            ...data,
+            'distance': distance,
+            'distanceDisplay': '${distance.toStringAsFixed(1)} km',
+            'eta': _calculateETA(distance, data['vehicleType'] ?? 'Motorcycle'),
+          });
+        }
+      }
+
+      if (providers.isEmpty) return null;
+
+      providers.sort((a, b) => a['distance'].compareTo(b['distance']));
+      return providers.first;
+    } catch (e) {
+      print('❌ Error finding nearest provider: $e');
+      return null;
     }
   }
 
-  // Create job with category support
+  // ============================================================
+  // GET PROVIDERS BY CATEGORY
+  // ============================================================
+  Future<List<Map<String, dynamic>>> getProvidersByCategory({
+    required String category,
+    double? userLat,
+    double? userLng,
+  }) async {
+    try {
+      final snapshot = await _firestore
+          .collection('washers')
+          .where('approved', isEqualTo: true)
+          .where('serviceCategory', isEqualTo: category)
+          .get();
+
+      List<Map<String, dynamic>> providers = [];
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+        providers.add({
+          'id': doc.id,
+          ...data,
+        });
+      }
+
+      // Sort by distance if location provided
+      if (userLat != null && userLng != null) {
+        for (var provider in providers) {
+          final lat = provider['currentLat'] ?? provider['latitude'] ?? 6.5244;
+          final lng = provider['currentLng'] ?? provider['longitude'] ?? 3.3792;
+          provider['distance'] = _calculateDistance(userLat, userLng, lat, lng);
+          provider['distanceDisplay'] = '${provider['distance'].toStringAsFixed(1)} km';
+        }
+        providers.sort((a, b) => a['distance'].compareTo(b['distance']));
+      }
+
+      return providers;
+    } catch (e) {
+      print('❌ Error getting providers: $e');
+      return [];
+    }
+  }
+
+  // ============================================================
+  // CREATE JOB IN FIRESTORE
+  // ============================================================
   Future<Map<String, dynamic>> createJob({
     required String customerId,
-    required String serviceType,
+    required String customerName,
+    required String serviceCategory,
+    required String serviceName,
     required int price,
-    required String address,
+    required String location,
     required double latitude,
     required double longitude,
-    String? category,
+    DateTime? scheduledDate,
+    String? scheduledTime,
     Map<String, dynamic>? additionalInfo,
   }) async {
-    await Future.delayed(const Duration(seconds: 1));
-    
-    return {
-      'id': 'JOB-${DateTime.now().millisecondsSinceEpoch}',
-      'customerId': customerId,
-      'serviceType': serviceType,
-      'category': category ?? 'Car Wash',
-      'price': price,
-      'address': address,
-      'latitude': latitude,
-      'longitude': longitude,
-      'additionalInfo': additionalInfo ?? {},
-      'status': 'pending',
-      'createdAt': DateTime.now().toIso8601String(),
-    };
+    try {
+      final jobData = {
+        'customerId': customerId,
+        'customerName': customerName,
+        'serviceCategory': serviceCategory,
+        'serviceName': serviceName,
+        'price': price,
+        'location': location,
+        'latitude': latitude,
+        'longitude': longitude,
+        'scheduledDate': scheduledDate?.toIso8601String(),
+        'scheduledTime': scheduledTime,
+        'status': 'searching',
+        'paymentStatus': 'pending',
+        'additionalInfo': additionalInfo ?? {},
+        'createdAt': FieldValue.serverTimestamp(),
+      };
+
+      final docRef = await _firestore.collection('jobs').add(jobData);
+      print('✅ Job created with ID: ${docRef.id}');
+
+      return {
+        'id': docRef.id,
+        ...jobData,
+      };
+    } catch (e) {
+      print('❌ Error creating job: $e');
+      rethrow;
+    }
   }
 
-  // Assign provider with category support
-  Future<Map<String, dynamic>> assignWasher(String jobId, String providerId) async {
-    await Future.delayed(const Duration(seconds: 1));
-    
-    final provider = _allProviders.firstWhere(
-      (p) => p['id'] == providerId,
-      orElse: () => _mockCarWashers.first,
-    );
-    
-    // Calculate estimated arrival time based on distance
-    final etaMinutes = provider['eta'] ?? _getETAForCategory(provider['category']);
-    
-    return {
-      'jobId': jobId,
-      'washerId': providerId,
-      'washerName': provider['name'],
-      'washerPhone': provider['phone'],
-      'washerRating': provider['rating'],
-      'washerVehicle': provider['vehicle'],
-      'estimatedArrival': etaMinutes,
-      'status': 'assigned',
-      'category': provider['category'],
-      'assignedAt': DateTime.now().toIso8601String(),
-    };
+  // ============================================================
+  // ASSIGN PROVIDER TO JOB
+  // ============================================================
+  Future<Map<String, dynamic>> assignProviderToJob({
+    required String jobId,
+    required String providerId,
+  }) async {
+    try {
+      // Get provider details
+      final providerDoc = await _firestore.collection('washers').doc(providerId).get();
+      if (!providerDoc.exists) {
+        throw Exception('Provider not found');
+      }
+
+      final providerData = providerDoc.data()!;
+
+      // Update job
+      await _firestore.collection('jobs').doc(jobId).update({
+        'washerId': providerId,
+        'washerName': providerData['name'] ?? 'Unknown',
+        'washerPhone': providerData['phone'] ?? '',
+        'status': 'assigned',
+        'assignedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Update provider stats
+      await _firestore.collection('washers').doc(providerId).update({
+        'pendingJobs': FieldValue.increment(1),
+        'lastJobAssigned': FieldValue.serverTimestamp(),
+      });
+
+      return {
+        'jobId': jobId,
+        'washerId': providerId,
+        'washerName': providerData['name'] ?? 'Unknown',
+        'washerPhone': providerData['phone'] ?? '',
+        'status': 'assigned',
+        'assignedAt': DateTime.now().toIso8601String(),
+      };
+    } catch (e) {
+      print('❌ Error assigning provider: $e');
+      rethrow;
+    }
   }
 
-  // Complete job
+  // ============================================================
+  // COMPLETE JOB
+  // ============================================================
   Future<Map<String, dynamic>> completeJob(String jobId) async {
-    await Future.delayed(const Duration(seconds: 1));
-    return {
-      'success': true,
-      'jobId': jobId,
-      'status': 'completed',
-      'completedAt': DateTime.now().toIso8601String(),
-    };
+    try {
+      // Get job details to update provider stats
+      final jobDoc = await _firestore.collection('jobs').doc(jobId).get();
+      if (!jobDoc.exists) {
+        throw Exception('Job not found');
+      }
+
+      final jobData = jobDoc.data()!;
+      final washerId = jobData['washerId'];
+      final price = jobData['price'] ?? 0;
+
+      // Update job
+      await _firestore.collection('jobs').doc(jobId).update({
+        'status': 'completed',
+        'completedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Update provider stats
+      if (washerId != null) {
+        await _firestore.collection('washers').doc(washerId).update({
+          'totalJobs': FieldValue.increment(1),
+          'totalEarnings': FieldValue.increment(price),
+          'pendingJobs': FieldValue.increment(-1),
+          'todayEarnings': FieldValue.increment(price),
+        });
+      }
+
+      return {
+        'success': true,
+        'jobId': jobId,
+        'status': 'completed',
+        'completedAt': DateTime.now().toIso8601String(),
+      };
+    } catch (e) {
+      print('❌ Error completing job: $e');
+      rethrow;
+    }
   }
 
-  // Cancel job
-  Future<Map<String, dynamic>> cancelJob(String jobId) async {
-    await Future.delayed(const Duration(seconds: 1));
-    return {
-      'success': true,
-      'jobId': jobId,
-      'status': 'cancelled',
-      'cancelledAt': DateTime.now().toIso8601String(),
-    };
+  // ============================================================
+  // CANCEL JOB
+  // ============================================================
+  Future<Map<String, dynamic>> cancelJob({
+    required String jobId,
+    required String reason,
+  }) async {
+    try {
+      // Get job details
+      final jobDoc = await _firestore.collection('jobs').doc(jobId).get();
+      if (!jobDoc.exists) {
+        throw Exception('Job not found');
+      }
+
+      final jobData = jobDoc.data()!;
+      final washerId = jobData['washerId'];
+
+      // Update job
+      await _firestore.collection('jobs').doc(jobId).update({
+        'status': 'cancelled',
+        'cancelledReason': reason,
+        'cancelledAt': FieldValue.serverTimestamp(),
+      });
+
+      // Update provider stats if assigned
+      if (washerId != null) {
+        await _firestore.collection('washers').doc(washerId).update({
+          'pendingJobs': FieldValue.increment(-1),
+        });
+      }
+
+      return {
+        'success': true,
+        'jobId': jobId,
+        'status': 'cancelled',
+        'cancelledAt': DateTime.now().toIso8601String(),
+      };
+    } catch (e) {
+      print('❌ Error cancelling job: $e');
+      rethrow;
+    }
   }
 
-  // Get job details
-  Future<Map<String, dynamic>> getJobDetails(String jobId) async {
-    await Future.delayed(const Duration(milliseconds: 500));
-    return {
-      'id': jobId,
-      'status': 'in_progress',
-      'createdAt': DateTime.now().subtract(const Duration(minutes: 15)).toIso8601String(),
-      'estimatedCompletion': DateTime.now().add(const Duration(minutes: 30)).toIso8601String(),
-    };
+  // ============================================================
+  // GET JOB DETAILS
+  // ============================================================
+  Future<Map<String, dynamic>?> getJobDetails(String jobId) async {
+    try {
+      final doc = await _firestore.collection('jobs').doc(jobId).get();
+      if (doc.exists) {
+        return {
+          'id': doc.id,
+          ...doc.data()!,
+        };
+      }
+      return null;
+    } catch (e) {
+      print('❌ Error getting job details: $e');
+      return null;
+    }
   }
 
-  // Get user's job history
+  // ============================================================
+  // GET USER JOBS (Customer)
+  // ============================================================
   Future<List<Map<String, dynamic>>> getUserJobs(String userId) async {
-    await Future.delayed(const Duration(seconds: 1));
-    return [
-      {
-        'id': 'JOB-001',
-        'serviceType': 'Exterior Wash',
-        'category': 'Car Wash',
-        'price': 3000,
-        'status': 'completed',
-        'date': DateTime.now().subtract(const Duration(days: 2)).toIso8601String(),
-        'providerName': 'John A.',
-        'rating': 5,
-      },
-      {
-        'id': 'JOB-002',
-        'serviceType': 'Standard Cleaning',
-        'category': 'House Cleaning',
-        'price': 15000,
-        'status': 'completed',
-        'date': DateTime.now().subtract(const Duration(days: 5)).toIso8601String(),
-        'providerName': 'Blessing O.',
-        'rating': 4,
-      },
-      {
-        'id': 'JOB-003',
-        'serviceType': 'Wash & Fold',
-        'category': 'Laundry',
-        'price': 2000,
-        'status': 'in_progress',
-        'date': DateTime.now().toIso8601String(),
-        'providerName': 'FreshClean Laundry',
-        'rating': null,
-      },
-    ];
+    try {
+      final snapshot = await _firestore
+          .collection('jobs')
+          .where('customerId', isEqualTo: userId)
+          .orderBy('createdAt', descending: true)
+          .get();
+
+      return snapshot.docs.map((doc) {
+        return {
+          'id': doc.id,
+          ...doc.data(),
+        };
+      }).toList();
+    } catch (e) {
+      print('❌ Error getting user jobs: $e');
+      return [];
+    }
   }
 
-  // Helper: Calculate distance between two coordinates (in km) - FIXED
+  // ============================================================
+  // GET WASHER JOBS (Provider)
+  // ============================================================
+  Future<List<Map<String, dynamic>>> getWasherJobs(String washerId) async {
+    try {
+      final snapshot = await _firestore
+          .collection('jobs')
+          .where('washerId', isEqualTo: washerId)
+          .orderBy('createdAt', descending: true)
+          .get();
+
+      return snapshot.docs.map((doc) {
+        return {
+          'id': doc.id,
+          ...doc.data(),
+        };
+      }).toList();
+    } catch (e) {
+      print('❌ Error getting washer jobs: $e');
+      return [];
+    }
+  }
+
+  // ============================================================
+  // GET PENDING JOBS (For Washers)
+  // ============================================================
+  Future<List<Map<String, dynamic>>> getPendingJobs({
+    String? category,
+    double? userLat,
+    double? userLng,
+    double radiusKm = 10.0,
+  }) async {
+    try {
+      var query = _firestore
+          .collection('jobs')
+          .where('status', isEqualTo: 'searching')
+          .orderBy('createdAt', descending: true);
+
+      if (category != null && category != 'All') {
+        query = query.where('serviceCategory', isEqualTo: category);
+      }
+
+      final snapshot = await query.get();
+      return snapshot.docs.map((doc) {
+        final data = doc.data();
+        return {
+          'id': doc.id,
+          ...data,
+        };
+      }).toList();
+    } catch (e) {
+      print('❌ Error getting pending jobs: $e');
+      return [];
+    }
+  }
+
+  // ============================================================
+  // GET PROVIDER STATS
+  // ============================================================
+  Future<Map<String, dynamic>> getProviderStats(String providerId) async {
+    try {
+      final doc = await _firestore.collection('washers').doc(providerId).get();
+      if (doc.exists) {
+        final data = doc.data()!;
+        return {
+          'totalJobs': data['totalJobs'] ?? 0,
+          'totalEarnings': data['totalEarnings'] ?? 0,
+          'rating': data['rating'] ?? 0.0,
+          'pendingJobs': data['pendingJobs'] ?? 0,
+          'todayEarnings': data['todayEarnings'] ?? 0,
+        };
+      }
+      return {
+        'totalJobs': 0,
+        'totalEarnings': 0,
+        'rating': 0.0,
+        'pendingJobs': 0,
+        'todayEarnings': 0,
+      };
+    } catch (e) {
+      print('❌ Error getting provider stats: $e');
+      return {
+        'totalJobs': 0,
+        'totalEarnings': 0,
+        'rating': 0.0,
+        'pendingJobs': 0,
+        'todayEarnings': 0,
+      };
+    }
+  }
+
+  // ============================================================
+  // UPDATE PROVIDER STATUS (Online/Offline)
+  // ============================================================
+  Future<void> updateProviderStatus({
+    required String providerId,
+    required bool isOnline,
+  }) async {
+    try {
+      await _firestore.collection('washers').doc(providerId).update({
+        'isOnline': isOnline,
+        'lastStatusUpdate': FieldValue.serverTimestamp(),
+      });
+      notifyListeners();
+    } catch (e) {
+      print('❌ Error updating provider status: $e');
+      rethrow;
+    }
+  }
+
+  // ============================================================
+  // GET PROVIDER DETAILS
+  // ============================================================
+  Future<Map<String, dynamic>?> getProviderDetails(String providerId) async {
+    try {
+      final doc = await _firestore.collection('washers').doc(providerId).get();
+      if (doc.exists) {
+        return {
+          'id': doc.id,
+          ...doc.data()!,
+        };
+      }
+      return null;
+    } catch (e) {
+      print('❌ Error getting provider details: $e');
+      return null;
+    }
+  }
+
+  // ============================================================
+  // UPDATE PROVIDER LOCATION (Real-time)
+  // ============================================================
+  Future<void> updateProviderLocation({
+    required String providerId,
+    required double latitude,
+    required double longitude,
+  }) async {
+    try {
+      await _firestore.collection('washers').doc(providerId).update({
+        'currentLat': latitude,
+        'currentLng': longitude,
+        'lastLocationUpdate': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      print('❌ Error updating provider location: $e');
+    }
+  }
+
+  // ============================================================
+  // HELPER METHODS
+  // ============================================================
+
+  // Calculate distance between two coordinates (in km)
   double _calculateDistance(double lat1, double lon1, double lat2, double lon2) {
     const double earthRadius = 6371;
     double dLat = _toRadians(lat2 - lat1);
@@ -343,47 +492,17 @@ class JobService extends ChangeNotifier {
     return degrees * pi / 180;
   }
 
-  // Helper: Calculate ETA based on distance and vehicle type
+  // Calculate ETA based on distance and vehicle type
   String _calculateETA(double distanceKm, String vehicleType) {
     int minutes;
-    if (vehicleType == 'Motorcycle') {
+    if (vehicleType == 'Motorcycle' || vehicleType == 'Bicycle') {
       minutes = (distanceKm * 2).round();
-    } else if (vehicleType == 'Van') {
+    } else if (vehicleType == 'Van' || vehicleType == 'Truck') {
       minutes = (distanceKm * 3).round();
     } else {
       minutes = (distanceKm * 2.5).round();
     }
-    minutes = minutes.clamp(5, 45);
+    minutes = minutes.clamp(5, 60);
     return '$minutes min';
-  }
-
-  // Helper: Get default ETA for category
-  String _getETAForCategory(String? category) {
-    switch (category) {
-      case 'House Cleaning':
-        return '30-45 min';
-      case 'Laundry':
-        return '20-30 min';
-      default:
-        return '15-20 min';
-    }
-  }
-
-  // Update provider online status
-  Future<void> updateProviderStatus(String providerId, bool isOnline) async {
-    await Future.delayed(const Duration(milliseconds: 500));
-    final allProviders = [..._mockCarWashers, ..._mockHouseCleaners, ..._mockLaundryProviders];
-    final provider = allProviders.firstWhere((p) => p['id'] == providerId);
-    provider['isOnline'] = isOnline;
-    notifyListeners();
-  }
-
-  // Get provider details
-  Future<Map<String, dynamic>> getProviderDetails(String providerId) async {
-    await Future.delayed(const Duration(milliseconds: 300));
-    return _allProviders.firstWhere(
-      (p) => p['id'] == providerId,
-      orElse: () => _mockCarWashers.first,
-    );
   }
 }

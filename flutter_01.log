@@ -1,0 +1,78 @@
+Flutter crash report.
+Please report a bug at https://github.com/flutter/flutter/issues.
+
+## command
+
+flutter run -d edge --release
+
+## exception
+
+PathNotFoundException: PathNotFoundException: Creation of temporary directory failed, path = 'C:\Users\ADMINI~1\AppData\Local\Temp\flutter_tools.c2beb897\flutter_tools_chrome_device.' (OS Error: The system cannot find the path specified.
+, errno = 3)
+
+```
+#0      _Directory.createTempSync (dart:io/directory_impl.dart:170:7)
+#1      ForwardingDirectory.createTempSync (package:file/src/forwarding/forwarding_directory.dart:28:21)
+#2      ChromiumLauncher.launch (package:flutter_tools/src/web/chrome.dart:192:8)
+#3      ChromiumDevice.startApp (package:flutter_tools/src/web/web_device.dart:145:38)
+#4      ResidentWebRunner.run.<anonymous closure> (package:flutter_tools/src/isolated/resident_web_runner.dart:353:31)
+<asynchronous suspension>
+#5      asyncGuard.<anonymous closure> (package:flutter_tools/src/base/async_guard.dart:111:24)
+<asynchronous suspension>
+```
+
+## flutter doctor
+
+```
+[32m[✓][39m Flutter (Channel stable, 3.22.0, on Microsoft Windows [Version 10.0.22000.2538], locale en-US)
+    [32m•[39m Flutter version 3.22.0 on channel stable at C:\flutter
+    [32m•[39m Upstream repository https://github.com/flutter/flutter.git
+    [32m•[39m Framework revision 5dcb86f68f (2 years, 2 months ago), 2024-05-09 07:39:20 -0500
+    [32m•[39m Engine revision f6344b75dc
+    [32m•[39m Dart version 3.4.0
+    [32m•[39m DevTools version 2.34.3
+
+[32m[✓][39m Windows Version (Installed version of Windows is version 10 or higher)
+
+[33m[!][39m Android toolchain - develop for Android devices (Android SDK version 36.1.0)
+    [32m•[39m Android SDK at C:\Users\Administrator\AppData\Local\Android\Sdk
+    [31m✗[39m cmdline-tools component is missing
+      Run `path/to/sdkmanager --install "cmdline-tools;latest"`
+      See https://developer.android.com/studio/command-line for more details.
+    [31m✗[39m Android license status unknown.
+      Run `flutter doctor --android-licenses` to accept the SDK licenses.
+      See https://flutter.dev/docs/get-started/install/windows#android-setup for more details.
+
+[32m[✓][39m Chrome - develop for the web
+    [32m•[39m Chrome at C:\Program Files\Google\Chrome\Application\chrome.exe
+
+[33m[!][39m Visual Studio - develop Windows apps (Visual Studio Build Tools 2022 17.14.21 (November 2025))
+    [32m•[39m Visual Studio at C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools
+    [32m•[39m Visual Studio Build Tools 2022 version 17.14.36717.8
+    [31m✗[39m The current Visual Studio installation is incomplete.
+      Please use Visual Studio Installer to complete the installation or reinstall Visual Studio.
+
+[32m[✓][39m Android Studio (version 2025.2.3)
+    [32m•[39m Android Studio at C:\Program Files\Android\Android Studio
+    [32m•[39m Flutter plugin can be installed from:
+      🔨 https://plugins.jetbrains.com/plugin/9212-flutter
+    [32m•[39m Dart plugin can be installed from:
+      🔨 https://plugins.jetbrains.com/plugin/6351-dart
+    [32m•[39m Java version OpenJDK Runtime Environment (build 21.0.8+-14196175-b1038.72)
+
+[32m[✓][39m VS Code (version unknown)
+    [32m•[39m VS Code at C:\Users\Administrator\AppData\Local\Programs\Microsoft VS Code
+    [32m•[39m Flutter extension can be installed from:
+      🔨 https://marketplace.visualstudio.com/items?itemName=Dart-Code.flutter
+    [31m✗[39m Unable to determine VS Code version.
+
+[32m[✓][39m Connected device (3 available)
+    [32m•[39m Windows (desktop) • windows • windows-x64    • Microsoft Windows [Version 10.0.22000.2538]
+    [32m•[39m Chrome (web)      • chrome  • web-javascript • Google Chrome 149.0.7827.115
+    [32m•[39m Edge (web)        • edge    • web-javascript • Microsoft Edge 149.0.4022.80
+
+[32m[✓][39m Network resources
+    [32m•[39m All expected network resources are available.
+
+[33m![39m Doctor found issues in 2 categories.
+```

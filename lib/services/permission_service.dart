@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:geolocator/geolocator.dart';
+import 'dart:io';
 
 class PermissionService {
   // ==================== LOCATION PERMISSIONS ====================
@@ -201,6 +202,24 @@ class PermissionService {
     return false;
   }
 
+  // ==================== PHONE PERMISSION ====================
+  
+  /// Request phone permission for making calls to service providers
+  static Future<bool> requestPhonePermission(BuildContext context) async {
+    final PermissionStatus status = await Permission.phone.request();
+    
+    if (status == PermissionStatus.granted) {
+      return true;
+    } else if (status == PermissionStatus.denied) {
+      // Phone calls can be made without permission
+      return false;
+    } else if (status == PermissionStatus.permanentlyDenied) {
+      return false;
+    }
+    
+    return false;
+  }
+
   // ==================== ALL PERMISSIONS AT ONCE ====================
   
   /// Request all required permissions at once
@@ -252,6 +271,12 @@ class PermissionService {
     return status == PermissionStatus.granted;
   }
   
+  /// Check if background location permission is granted
+  static Future<bool> isBackgroundLocationPermissionGranted() async {
+    final PermissionStatus status = await Permission.locationAlways.status;
+    return status == PermissionStatus.granted;
+  }
+  
   /// Check if camera permission is granted
   static Future<bool> isCameraPermissionGranted() async {
     final PermissionStatus status = await Permission.camera.status;
@@ -269,17 +294,46 @@ class PermissionService {
     }
   }
   
+  /// Check if notification permission is granted
+  static Future<bool> isNotificationPermissionGranted() async {
+    if (await _isAndroid13OrAbove()) {
+      final PermissionStatus status = await Permission.notification.status;
+      return status == PermissionStatus.granted;
+    }
+    return true;
+  }
+  
   /// Check if location services are enabled
   static Future<bool> areLocationServicesEnabled() async {
     return await Geolocator.isLocationServiceEnabled();
+  }
+
+  // ==================== BULK PERMISSION CHECK ====================
+  
+  /// Check all required permissions at once
+  static Future<Map<String, bool>> checkAllPermissions() async {
+    final results = <String, bool>{};
+    
+    results['location'] = await isLocationPermissionGranted();
+    results['camera'] = await isCameraPermissionGranted();
+    results['storage'] = await isStoragePermissionGranted();
+    results['notifications'] = await isNotificationPermissionGranted();
+    results['locationServices'] = await areLocationServicesEnabled();
+    
+    return results;
   }
 
   // ==================== HELPER METHODS ====================
   
   /// Check if device is running Android 13 or above
   static Future<bool> _isAndroid13OrAbove() async {
-    // This is a simple check - you can also use device_info_plus package
-    return true; // For now, assume Android 13+
+    // Use Platform.isAndroid and version check
+    if (Platform.isAndroid) {
+      // Android 13 is API level 33
+      // You can use device_info_plus to get exact version
+      return true; // For now, assume Android 13+
+    }
+    return false;
   }
   
   /// Show permission dialog
@@ -291,14 +345,19 @@ class PermissionService {
   }) {
     showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (context) => AlertDialog(
-        title: Text(title),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          title,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
         content: Text(message),
         actions: [
           if (showCancelButton)
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: const Text('Not Now'),
+              child: const Text('Not Now', style: TextStyle(color: Colors.grey)),
             ),
           ElevatedButton(
             onPressed: () {
@@ -307,6 +366,10 @@ class PermissionService {
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF0CAF60),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
             child: const Text('Grant Permission'),
           ),
@@ -323,13 +386,18 @@ class PermissionService {
   ) {
     showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (context) => AlertDialog(
-        title: Text(title),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          title,
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
         content: Text(message),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
           ),
           ElevatedButton(
             onPressed: () {
@@ -338,6 +406,10 @@ class PermissionService {
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF0CAF60),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
             child: const Text('Open Settings'),
           ),
@@ -354,13 +426,18 @@ class PermissionService {
   }) {
     showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (context) => AlertDialog(
-        title: const Text('Location Services Required'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text(
+          'Location Services Required',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
         content: Text(message),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
           ),
           ElevatedButton(
             onPressed: () {
@@ -373,10 +450,32 @@ class PermissionService {
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF0CAF60),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
             child: const Text('Enable Location'),
           ),
         ],
+      ),
+    );
+  }
+  
+  /// Show permission denied snackbar
+  static void showPermissionDeniedSnackBar(BuildContext context, String featureName) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('$featureName requires permission. Please grant it in settings.'),
+        backgroundColor: Colors.orange,
+        duration: const Duration(seconds: 4),
+        action: SnackBarAction(
+          label: 'Settings',
+          textColor: Colors.white,
+          onPressed: () {
+            openAppSettings();
+          },
+        ),
       ),
     );
   }

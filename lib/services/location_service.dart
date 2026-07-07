@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:math';
@@ -9,6 +11,10 @@ class LocationService extends ChangeNotifier {
   Position? _currentPosition;
   bool _isLoading = false;
   String? _currentAddress;
+  String? _currentCity;
+  String? _currentState;
+  
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   
   // Google Maps API Key (Replace with your actual key)
   static const String GOOGLE_MAPS_API_KEY = 'AIzaSyCXzpvcdGJARb7WcDzXtcwzLEUMwt5bRjw';
@@ -23,6 +29,8 @@ class LocationService extends ChangeNotifier {
   Position? get currentPosition => _currentPosition;
   bool get isLoading => _isLoading;
   String? get currentAddress => _currentAddress;
+  String? get currentCity => _currentCity;
+  String? get currentState => _currentState;
 
   // ==================== LOCATION PERMISSIONS & GPS ====================
   
@@ -51,15 +59,18 @@ class LocationService extends ChangeNotifier {
       _currentPosition = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
-          distanceFilter: 10, // Update every 10 meters
+          distanceFilter: 10,
         ),
       );
       
-      // Get address from coordinates
+      // Get address and update location in Firestore
       await getAddressFromLatLng(
         _currentPosition!.latitude,
         _currentPosition!.longitude,
       );
+      
+      // Update user's location in Firestore if logged in
+      await _updateUserLocationInFirestore();
       
       _isLoading = false;
       notifyListeners();
@@ -71,19 +82,54 @@ class LocationService extends ChangeNotifier {
     }
   }
 
+  // Update user location in Firestore
+  Future<void> _updateUserLocationInFirestore() async {
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null && _currentPosition != null) {
+        await _firestore.collection('users').doc(user.uid).update({
+          'currentLat': _currentPosition!.latitude,
+          'currentLng': _currentPosition!.longitude,
+          'currentAddress': _currentAddress,
+          'currentCity': _currentCity,
+          'currentState': _currentState,
+          'lastLocationUpdate': FieldValue.serverTimestamp(),
+        });
+      }
+    } catch (e) {
+      print('❌ Error updating location in Firestore: $e');
+    }
+  }
+
+  // Update washer location in Firestore (for real-time tracking)
+  Future<void> updateWasherLocation({
+    required String washerId,
+    required double latitude,
+    required double longitude,
+  }) async {
+    try {
+      await _firestore.collection('washers').doc(washerId).update({
+        'currentLat': latitude,
+        'currentLng': longitude,
+        'lastLocationUpdate': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      print('❌ Error updating washer location: $e');
+    }
+  }
+
   // Start continuous location tracking (for live tracking)
   Stream<Position> getLocationStream() {
     return Geolocator.getPositionStream(
       locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.high,
-        distanceFilter: 10, // Update every 10 meters
+        distanceFilter: 10,
       ),
     );
   }
 
   // ==================== GOOGLE MAPS GEOCODING ====================
   
-  // Convert address to coordinates (Geocoding)
   Future<LatLng?> getCoordinatesFromAddress(String address) async {
     try {
       final encodedAddress = Uri.encodeComponent(address);
@@ -115,7 +161,13 @@ class LocationService extends ChangeNotifier {
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         if (data['status'] == 'OK' && data['results'].isNotEmpty) {
-          _currentAddress = data['results'][0]['formatted_address'];
+          final result = data['results'][0];
+          _currentAddress = result['formatted_address'];
+          
+          // Extract city and state from address components
+          _currentCity = _extractAddressComponent(result, ['locality', 'administrative_area_level_2']);
+          _currentState = _extractAddressComponent(result, ['administrative_area_level_1']);
+          
           notifyListeners();
           return _currentAddress!;
         }
@@ -126,10 +178,26 @@ class LocationService extends ChangeNotifier {
       return 'Unable to get address';
     }
   }
-
-  // ==================== PLACES AUTOCOMPLETE (Search ANYWHERE in Nigeria) ====================
   
-  // Search places across Nigeria
+  String? _extractAddressComponent(Map<String, dynamic> result, List<String> types) {
+    final components = result['address_components'] as List?;
+    if (components == null) return null;
+    
+    for (var component in components) {
+      final componentTypes = component['types'] as List?;
+      if (componentTypes != null) {
+        for (var type in types) {
+          if (componentTypes.contains(type)) {
+            return component['long_name'];
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  // ==================== PLACES AUTOCOMPLETE ====================
+  
   Future<List<Map<String, dynamic>>> searchPlaces(String query) async {
     if (query.length < 2) return [];
     
@@ -151,7 +219,6 @@ class LocationService extends ChangeNotifier {
     }
   }
   
-  // Get place details by place_id
   Future<Map<String, dynamic>?> getPlaceDetails(String placeId) async {
     try {
       final response = await http.get(
@@ -173,7 +240,6 @@ class LocationService extends ChangeNotifier {
 
   // ==================== DISTANCE & ETA CALCULATIONS ====================
   
-  // Get distance and duration between two locations
   Future<Map<String, dynamic>?> getDistanceAndDuration(
     LatLng origin,
     LatLng destination,
@@ -204,7 +270,6 @@ class LocationService extends ChangeNotifier {
     }
   }
   
-  // Get directions between two points (for route drawing)
   Future<Map<String, dynamic>?> getDirections(
     LatLng origin,
     LatLng destination,
@@ -258,35 +323,8 @@ class LocationService extends ChangeNotifier {
     return points;
   }
 
-  // ==================== NEARBY SEARCH ====================
-  
-  // Search for nearby service providers
-  Future<List<Map<String, dynamic>>> searchNearby(
-    double lat,
-    double lng,
-    String type, // car_wash, cleaning_service, laundry
-  ) async {
-    try {
-      final response = await http.get(
-        Uri.parse('https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=$lat,$lng&radius=5000&type=$type&key=$GOOGLE_MAPS_API_KEY'),
-      );
-      
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        if (data['status'] == 'OK' && data['results'] != null) {
-          return List<Map<String, dynamic>>.from(data['results']);
-        }
-      }
-      return [];
-    } catch (e) {
-      print('Nearby search error: $e');
-      return [];
-    }
-  }
-
   // ==================== STATIC HELPER METHODS ====================
   
-  // Calculate distance between two coordinates (Haversine formula)
   static double calculateDistance(double lat1, double lon1, double lat2, double lon2) {
     const double earthRadius = 6371; // km
     final dLat = _toRadians(lat2 - lat1);
@@ -302,7 +340,6 @@ class LocationService extends ChangeNotifier {
     return degrees * pi / 180;
   }
   
-  // Format distance for display
   static String formatDistance(double km) {
     if (km < 1) {
       return '${(km * 1000).round()} m';
@@ -310,7 +347,6 @@ class LocationService extends ChangeNotifier {
     return '${km.toStringAsFixed(1)} km';
   }
   
-  // Format duration for display
   static String formatDuration(int seconds) {
     if (seconds < 60) {
       return '${seconds} sec';
@@ -327,7 +363,6 @@ class LocationService extends ChangeNotifier {
     return '$hours hr $remainingMinutes min';
   }
   
-  // Find nearest provider from list
   static Map<String, dynamic>? findNearestProvider(
     Position userLocation,
     List<Map<String, dynamic>> providers,
@@ -356,7 +391,6 @@ class LocationService extends ChangeNotifier {
 
   // ==================== AUTOCOMPLETE SUGGESTIONS ====================
   
-  // Get autocomplete suggestions for Nigerian locations
   Future<List<Map<String, dynamic>>> getAutocompleteSuggestions(String input) async {
     if (input.isEmpty) return [];
     
@@ -375,6 +409,45 @@ class LocationService extends ChangeNotifier {
     } catch (e) {
       print('Autocomplete error: $e');
       return [];
+    }
+  }
+
+  // ==================== FIREBASE LOCATION HELPERS ====================
+  
+  // Save location to Firestore
+  Future<void> saveLocationToFirestore({
+    required String userId,
+    required double lat,
+    required double lng,
+    String? address,
+  }) async {
+    try {
+      await _firestore.collection('users').doc(userId).update({
+        'savedLocation': {
+          'lat': lat,
+          'lng': lng,
+          'address': address ?? _currentAddress,
+          'city': _currentCity,
+          'state': _currentState,
+          'savedAt': FieldValue.serverTimestamp(),
+        }
+      });
+    } catch (e) {
+      print('❌ Error saving location to Firestore: $e');
+    }
+  }
+  
+  // Get saved location from Firestore
+  Future<Map<String, dynamic>?> getSavedLocation(String userId) async {
+    try {
+      final doc = await _firestore.collection('users').doc(userId).get();
+      if (doc.exists) {
+        return doc.data()?['savedLocation'];
+      }
+      return null;
+    } catch (e) {
+      print('❌ Error getting saved location: $e');
+      return null;
     }
   }
 }

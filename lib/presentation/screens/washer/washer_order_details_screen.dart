@@ -1,21 +1,212 @@
 // FILE: lib/presentation/screens/washer/washer_order_details_screen.dart
-// PURPOSE: Detailed view of a specific order for washer
+// PURPOSE: Detailed view of a specific order for washer with Firebase integration
 
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
 import '../../../core/constants/app_colors.dart';
 
-class WasherOrderDetailsScreen extends StatelessWidget {
-  final Map<String, dynamic> order;
+class WasherOrderDetailsScreen extends StatefulWidget {
+  final String jobId;
+  final Map<String, dynamic>? order;
 
-  const WasherOrderDetailsScreen({super.key, required this.order});
+  const WasherOrderDetailsScreen({
+    super.key,
+    required this.jobId,
+    this.order,
+  });
+
+  @override
+  State<WasherOrderDetailsScreen> createState() => _WasherOrderDetailsScreenState();
+}
+
+class _WasherOrderDetailsScreenState extends State<WasherOrderDetailsScreen> {
+  Map<String, dynamic>? _orderData;
+  bool _isLoading = true;
+  bool _isProcessing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.order != null) {
+      _orderData = widget.order;
+      _isLoading = false;
+    } else {
+      _loadOrderData();
+    }
+  }
+
+  Future<void> _loadOrderData() async {
+    setState(() => _isLoading = true);
+    
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('jobs')
+          .doc(widget.jobId)
+          .get();
+      
+      if (doc.exists) {
+        setState(() {
+          _orderData = doc.data()!;
+          _orderData!['id'] = doc.id;
+          _isLoading = false;
+        });
+      } else {
+        setState(() => _isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Order not found'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    } catch (e) {
+      print('❌ Error loading order: $e');
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error loading order: $e'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    }
+  }
+
+  Future<void> _updateOrderStatus(String newStatus) async {
+    setState(() => _isProcessing = true);
+
+    try {
+      await FirebaseFirestore.instance
+          .collection('jobs')
+          .doc(widget.jobId)
+          .update({
+        'status': newStatus,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Update local data
+      setState(() {
+        _orderData!['status'] = newStatus;
+        _isProcessing = false;
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Order ${_getStatusDisplay(newStatus)}'),
+          backgroundColor: AppColors.success,
+        ),
+      );
+
+      // Navigate back after completion
+      if (newStatus == 'completed') {
+        Future.delayed(const Duration(seconds: 1), () {
+          Navigator.pop(context, true);
+        });
+      }
+    } catch (e) {
+      print('❌ Error updating order: $e');
+      setState(() => _isProcessing = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error updating order: $e'),
+          backgroundColor: AppColors.error,
+        ),
+      );
+    }
+  }
+
+  String _getStatusDisplay(String status) {
+    switch (status) {
+      case 'accepted':
+        return 'accepted';
+      case 'enRoute':
+        return 'en route';
+      case 'completed':
+        return 'completed successfully! 🎉';
+      case 'cancelled':
+        return 'cancelled';
+      default:
+        return status;
+    }
+  }
+
+  Color _getStatusColor(String status) {
+    switch (status) {
+      case 'searching':
+        return Colors.orange;
+      case 'assigned':
+        return Colors.blue;
+      case 'accepted':
+        return Colors.blue;
+      case 'enRoute':
+        return Colors.orange;
+      case 'completed':
+        return Colors.green;
+      case 'cancelled':
+        return Colors.red;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  String _getStatusIcon(String status) {
+    switch (status) {
+      case 'searching':
+        return '🔍';
+      case 'assigned':
+        return '📋';
+      case 'accepted':
+        return '✅';
+      case 'enRoute':
+        return '🚗';
+      case 'completed':
+        return '🎉';
+      case 'cancelled':
+        return '❌';
+      default:
+        return '📌';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_orderData == null) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Order Details'),
+          backgroundColor: AppColors.primary,
+          foregroundColor: Colors.white,
+        ),
+        body: const Center(
+          child: Text('Order not found'),
+        ),
+      );
+    }
+
+    final order = _orderData!;
+    final status = order['status'] ?? 'searching';
+    final isActive = status != 'completed' && status != 'cancelled';
+    final isCompleted = status == 'completed';
+    final isCancelled = status == 'cancelled';
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Order Details'),
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
+        actions: [
+          if (isActive)
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              onPressed: _loadOrderData,
+            ),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -28,10 +219,19 @@ class WasherOrderDetailsScreen extends StatelessWidget {
                 padding: const EdgeInsets.all(16),
                 child: Row(
                   children: [
-                    Icon(
-                      order['status'] == 'Completed' ? Icons.check_circle : Icons.pending,
-                      color: order['status'] == 'Completed' ? Colors.green : Colors.orange,
-                      size: 30,
+                    Container(
+                      width: 50,
+                      height: 50,
+                      decoration: BoxDecoration(
+                        color: _getStatusColor(status).withOpacity(0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Center(
+                        child: Text(
+                          _getStatusIcon(status),
+                          style: const TextStyle(fontSize: 24),
+                        ),
+                      ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -39,15 +239,27 @@ class WasherOrderDetailsScreen extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Order #${order['id']}',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
-                          ),
-                          Text(
-                            order['status'],
-                            style: TextStyle(
-                              color: order['status'] == 'Completed' ? Colors.green : Colors.orange,
+                            'Order #${order['id']?.substring(0, 8) ?? 'N/A'}',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
                             ),
                           ),
+                          Text(
+                            status.toUpperCase(),
+                            style: TextStyle(
+                              color: _getStatusColor(status),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          if (order['createdAt'] != null)
+                            Text(
+                              'Placed: ${DateFormat('MMM dd, yyyy • hh:mm a').format((order['createdAt'] as Timestamp).toDate())}',
+                              style: TextStyle(
+                                color: Colors.grey.shade600,
+                                fontSize: 12,
+                              ),
+                            ),
                         ],
                       ),
                     ),
@@ -69,11 +281,14 @@ class WasherOrderDetailsScreen extends StatelessWidget {
                       style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 12),
-                    _buildDetailRow('Service Type', order['title']),
-                    _buildDetailRow('Amount', order['price']),
-                    _buildDetailRow('Date', order['date']),
-                    _buildDetailRow('Time', order['time']),
-                    _buildDetailRow('Duration', order['duration']),
+                    _buildDetailRow('Service', order['serviceName'] ?? 'N/A'),
+                    _buildDetailRow('Category', order['serviceCategory'] ?? 'N/A'),
+                    _buildDetailRow('Amount', '₦${NumberFormat('#,###').format(order['price'] ?? 0)}'),
+                    _buildDetailRow('Location', order['location'] ?? 'N/A'),
+                    if (order['date'] != null)
+                      _buildDetailRow('Date', order['date']),
+                    if (order['time'] != null)
+                      _buildDetailRow('Time', order['time']),
                   ],
                 ),
               ),
@@ -92,9 +307,64 @@ class WasherOrderDetailsScreen extends StatelessWidget {
                       style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 12),
-                    _buildDetailRow('Name', order['customerName']),
-                    _buildDetailRow('Phone', order['customerPhone']),
-                    _buildDetailRow('Address', order['address']),
+                    _buildDetailRow('Name', order['customerName'] ?? 'Unknown'),
+                    _buildDetailRow('Phone', order['customerPhone'] ?? 'N/A'),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Payment Status
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Payment',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Status'),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: (order['paymentStatus'] == 'paid')
+                                ? Colors.green.withOpacity(0.1)
+                                : Colors.orange.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            (order['paymentStatus'] ?? 'pending').toUpperCase(),
+                            style: TextStyle(
+                              color: (order['paymentStatus'] == 'paid')
+                                  ? Colors.green
+                                  : Colors.orange,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Amount'),
+                        Text(
+                          '₦${NumberFormat('#,###').format(order['price'] ?? 0)}',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.primary,
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
@@ -102,33 +372,172 @@ class WasherOrderDetailsScreen extends StatelessWidget {
             const SizedBox(height: 24),
 
             // Action Buttons
-            if (order['status'] == 'Pending')
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.pop(context),
-                      style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: AppColors.error),
-                        foregroundColor: AppColors.error,
+            if (!isCompleted && !isCancelled) ...[
+              if (status == 'assigned' || status == 'accepted')
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _isProcessing ? null : () => _updateOrderStatus('cancelled'),
+                        icon: const Icon(Icons.close),
+                        label: const Text('Cancel'),
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: AppColors.error),
+                          foregroundColor: AppColors.error,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
                       ),
-                      child: const Text('Decline'),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: () {
-                        Navigator.pop(context);
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Job accepted!')),
-                        );
-                      },
-                      child: const Text('Accept'),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: _isProcessing ? null : () => _updateOrderStatus('enRoute'),
+                        icon: _isProcessing
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                ),
+                              )
+                            : const Icon(Icons.directions_car),
+                        label: Text(_isProcessing ? 'Processing...' : 'Start Trip'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
+
+              if (status == 'enRoute')
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _isProcessing ? null : () => _updateOrderStatus('cancelled'),
+                        icon: const Icon(Icons.close),
+                        label: const Text('Cancel'),
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: AppColors.error),
+                          foregroundColor: AppColors.error,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: _isProcessing ? null : () => _updateOrderStatus('completed'),
+                        icon: _isProcessing
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                ),
+                              )
+                            : const Icon(Icons.check),
+                        label: Text(_isProcessing ? 'Processing...' : 'Complete Job'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+
+              if (status == 'searching')
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: _isProcessing ? null : () => _updateOrderStatus('cancelled'),
+                        icon: const Icon(Icons.close),
+                        label: const Text('Decline'),
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: AppColors.error),
+                          foregroundColor: AppColors.error,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: _isProcessing ? null : () => _updateOrderStatus('accepted'),
+                        icon: _isProcessing
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                ),
+                              )
+                            : const Icon(Icons.check),
+                        label: Text(_isProcessing ? 'Processing...' : 'Accept Job'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+            ],
+
+            if (isCompleted)
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.green.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.check_circle, color: Colors.green),
+                    SizedBox(width: 12),
+                    Text(
+                      'This job has been completed',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green,
+                      ),
+                    ),
+                  ],
+                ),
               ),
+
+            if (isCancelled)
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.cancel, color: Colors.red),
+                    SizedBox(width: 12),
+                    Text(
+                      'This job has been cancelled',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: Colors.red,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 16),
           ],
         ),
       ),
@@ -139,13 +548,26 @@ class WasherOrderDetailsScreen extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 120,
-            child: Text(label, style: TextStyle(color: AppColors.grey600)),
+            width: 100,
+            child: Text(
+              label,
+              style: TextStyle(
+                color: AppColors.grey600,
+                fontSize: 14,
+              ),
+            ),
           ),
           Expanded(
-            child: Text(value, style: const TextStyle(fontWeight: FontWeight.w500)),
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontWeight: FontWeight.w500,
+                fontSize: 14,
+              ),
+            ),
           ),
         ],
       ),

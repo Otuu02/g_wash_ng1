@@ -3,12 +3,15 @@
 // No API key required! Works as a fallback when Google Maps quota is exceeded.
 
 import 'package:http/http.dart' as http;
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:convert';
 
 class OSMService {
   static const String NOMINATIM_URL = 'https://nominatim.openstreetmap.org/search';
   static const String REVERSE_URL = 'https://nominatim.openstreetmap.org/reverse';
   static const String DETAILS_URL = 'https://nominatim.openstreetmap.org/details';
+  
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   
   /// Search for addresses in Nigeria (FREE fallback when Google Maps quota exceeded)
   static Future<List<Map<String, dynamic>>> searchInNigeria(String query) async {
@@ -20,7 +23,7 @@ class OSMService {
           '$NOMINATIM_URL?q=${Uri.encodeComponent(query)}&countrycodes=ng&format=json&limit=20&addressdetails=1&namedetails=1'
         ),
         headers: {
-          'User-Agent': 'GwashNG/1.0 (contact@example.com)', // Required by OSM
+          'User-Agent': 'GwashNG/1.0 (contact@gwashng.com)', // Updated email
           'Accept-Language': 'en-NG,en',
         },
       );
@@ -197,6 +200,7 @@ class OSMService {
     String postcode = address['postcode'] ?? '';
     String road = address['road'] ?? '';
     String suburb = address['suburb'] ?? '';
+    String neighbourhood = address['neighbourhood'] ?? '';
     
     // Build short address
     String shortAddress = name.isNotEmpty ? name : road;
@@ -210,6 +214,7 @@ class OSMService {
     return {
       'description': displayName,
       'shortAddress': shortAddress,
+      'fullAddress': displayName,
       'lat': double.parse(place['lat'].toString()),
       'lon': double.parse(place['lon'].toString()),
       'place_id': place['place_id'],
@@ -223,6 +228,7 @@ class OSMService {
       'postcode': postcode,
       'road': road,
       'suburb': suburb,
+      'neighbourhood': neighbourhood,
     };
   }
   
@@ -249,6 +255,7 @@ class OSMService {
 
 class LocationCache {
   static final Map<String, Map<String, dynamic>> _cache = {};
+  static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   
   static void cacheLocation(String query, List<Map<String, dynamic>> results) {
     _cache[query.toLowerCase()] = {
@@ -271,6 +278,37 @@ class LocationCache {
   
   static void clearCache() {
     _cache.clear();
+  }
+  
+  // Save to Firestore cache (for persistence across sessions)
+  static Future<void> saveToFirestore(String query, List<Map<String, dynamic>> results) async {
+    try {
+      await _firestore.collection('location_cache').doc(query.toLowerCase()).set({
+        'query': query.toLowerCase(),
+        'results': results,
+        'timestamp': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      print('❌ Error saving to Firestore cache: $e');
+    }
+  }
+  
+  static Future<List<Map<String, dynamic>>?> getFromFirestore(String query) async {
+    try {
+      final doc = await _firestore.collection('location_cache').doc(query.toLowerCase()).get();
+      if (doc.exists) {
+        final data = doc.data()!;
+        final age = DateTime.now().millisecondsSinceEpoch - 
+            (data['timestamp'] as Timestamp).millisecondsSinceEpoch;
+        if (age < 24 * 60 * 60 * 1000) {
+          return List<Map<String, dynamic>>.from(data['results']);
+        }
+      }
+      return null;
+    } catch (e) {
+      print('❌ Error getting from Firestore cache: $e');
+      return null;
+    }
   }
 }
 
@@ -304,6 +342,7 @@ class NigerianLocations {
   // Lagos specific areas
   static final List<Map<String, dynamic>> lagosAreas = [
     {'name': 'Lekki Phase 1', 'lat': 6.4531, 'lon': 3.8991},
+    {'name': 'Lekki Phase 2', 'lat': 6.4700, 'lon': 3.8800},
     {'name': 'Victoria Island', 'lat': 6.4281, 'lon': 3.4219},
     {'name': 'Ikoyi', 'lat': 6.4600, 'lon': 3.4360},
     {'name': 'Surulere', 'lat': 6.5017, 'lon': 3.3581},
@@ -313,6 +352,15 @@ class NigerianLocations {
     {'name': 'Maryland', 'lat': 6.5840, 'lon': 3.3630},
     {'name': 'Yaba', 'lat': 6.4980, 'lon': 3.3730},
     {'name': 'Magodo', 'lat': 6.5980, 'lon': 3.4000},
+    {'name': 'Ogudu', 'lat': 6.5900, 'lon': 3.3900},
+    {'name': 'Ketu', 'lat': 6.5800, 'lon': 3.3800},
+    {'name': 'Mile 12', 'lat': 6.5500, 'lon': 3.3500},
+    {'name': 'Oshodi', 'lat': 6.5400, 'lon': 3.3400},
+    {'name': 'Apapa', 'lat': 6.4500, 'lon': 3.3500},
+    {'name': 'Mushin', 'lat': 6.5200, 'lon': 3.3300},
+    {'name': 'Agege', 'lat': 6.6200, 'lon': 3.3100},
+    {'name': 'Badagry', 'lat': 6.4100, 'lon': 2.8800},
+    {'name': 'Epe', 'lat': 6.5800, 'lon': 3.9800},
   ];
   
   static List<Map<String, dynamic>> searchInDatabase(String query) {
@@ -328,6 +376,7 @@ class NigerianLocations {
           'lat': city['lat'],
           'lon': city['lon'],
           'type': 'city',
+          'state': city['state'],
         });
       }
     }
@@ -341,10 +390,46 @@ class NigerianLocations {
           'lat': area['lat'],
           'lon': area['lon'],
           'type': 'area',
+          'state': 'Lagos',
         });
       }
     }
     
     return results;
+  }
+  
+  // Get city suggestions
+  static List<String> getCitySuggestions(String query) {
+    final lowerQuery = query.toLowerCase();
+    final results = <String>[];
+    
+    for (var city in majorCities) {
+      if (city['name'].toLowerCase().contains(lowerQuery)) {
+        results.add(city['name']);
+      }
+    }
+    
+    for (var area in lagosAreas) {
+      if (area['name'].toLowerCase().contains(lowerQuery)) {
+        results.add(area['name']);
+      }
+    }
+    
+    return results;
+  }
+  
+  // Get state for a city
+  static String? getStateForCity(String cityName) {
+    for (var city in majorCities) {
+      if (city['name'].toLowerCase() == cityName.toLowerCase()) {
+        return city['state'];
+      }
+    }
+    for (var area in lagosAreas) {
+      if (area['name'].toLowerCase() == cityName.toLowerCase()) {
+        return 'Lagos';
+      }
+    }
+    return null;
   }
 }

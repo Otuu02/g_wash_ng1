@@ -1,8 +1,12 @@
 // lib/presentation/screens/customer/booking_screen.dart
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:provider/provider.dart';
 import '../../../core/constants/app_colors.dart';
-import 'payment_screen.dart';
+import '../../../services/auth_service.dart';
+import '../washer/matching_screen.dart';
 
 class BookingScreen extends StatefulWidget {
   final String? selectedService;
@@ -29,8 +33,7 @@ class _BookingScreenState extends State<BookingScreen> {
   String _selectedLocation = 'Lekki Phase 1, Lagos';
   DateTime _selectedDate = DateTime.now();
   String _selectedTime = '9:00 AM';
-  String _selectedPaymentMethod = 'Wallet';
-  int _currentStep = 0;
+  bool _isBooking = false;
 
   final List<String> _categories = ['Car Wash', 'House Cleaning', 'Laundry'];
 
@@ -60,8 +63,6 @@ class _BookingScreenState extends State<BookingScreen> {
     '9:00 AM', '10:30 AM', '12:00 PM', '1:30 PM', '3:00 PM', '4:30 PM', '6:00 PM'
   ];
 
-  final List<String> _paymentMethods = ['Wallet', 'Card', 'Bank Transfer', 'Pay on Delivery'];
-
   @override
   void initState() {
     super.initState();
@@ -88,6 +89,19 @@ class _BookingScreenState extends State<BookingScreen> {
       (service) => service['name'] == _selectedService,
       orElse: () => _currentServices[0],
     );
+  }
+
+  String get _actionButtonText {
+    switch (_selectedCategory) {
+      case 'Car Wash':
+        return 'Book Car Wash';
+      case 'House Cleaning':
+        return 'Book House Cleaning';
+      case 'Laundry':
+        return 'Book Laundry';
+      default:
+        return 'Book Now';
+    }
   }
 
   void _showServicePicker() {
@@ -120,7 +134,7 @@ class _BookingScreenState extends State<BookingScreen> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                       title: Text(service['name']),
-                      subtitle: Text('${service['priceDisplay']} - ${service['duration']}'),
+                      subtitle: Text('₦${NumberFormat('#,###').format(service['price'])} · ${service['duration']}'),
                       trailing: isSelected
                           ? const Icon(Icons.check_circle, color: AppColors.primary)
                           : null,
@@ -194,79 +208,123 @@ class _BookingScreenState extends State<BookingScreen> {
     );
   }
 
-  void _showPaymentPicker() {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) {
-        return Container(
-          padding: const EdgeInsets.all(20),
-          height: 300,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Select Payment Method',
-                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 16),
-              Expanded(
-                child: ListView.builder(
-                  itemCount: _paymentMethods.length,
-                  itemBuilder: (context, index) {
-                    final method = _paymentMethods[index];
-                    final isSelected = method == _selectedPaymentMethod;
-                    return ListTile(
-                      tileColor: isSelected ? AppColors.primary.withOpacity(0.1) : null,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      leading: Icon(
-                        method == 'Wallet' ? Icons.wallet :
-                        method == 'Card' ? Icons.credit_card :
-                        method == 'Bank Transfer' ? Icons.account_balance :
-                        Icons.payments,
-                        color: AppColors.primary,
-                      ),
-                      title: Text(method),
-                      trailing: isSelected
-                          ? const Icon(Icons.check_circle, color: AppColors.primary)
-                          : null,
-                      onTap: () {
-                        setState(() => _selectedPaymentMethod = method);
-                        Navigator.pop(context);
-                      },
-                    );
-                  },
-                ),
-              ),
-            ],
+  // ============================================================
+  // FIX 1: Check auth using AuthService provider
+  // ============================================================
+  void _bookService() async {
+    setState(() => _isBooking = true);
+
+    try {
+      // Get AuthService from provider
+      final authService = Provider.of<AuthService>(context, listen: false);
+      
+      // Check if user is logged in
+      if (!authService.isLoggedIn) {
+        throw Exception('Please login to book a service');
+      }
+
+      // Get current user from Firebase Auth
+      final user = FirebaseAuth.instance.currentUser;
+      
+      if (user == null) {
+        throw Exception('Please login to book a service');
+      }
+
+      // Get user data from Firestore
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+      
+      // FIXED: Properly handle null data
+      final customerName = userDoc.exists 
+          ? (userDoc.data()?['name'] ?? 'Customer') 
+          : 'Customer';
+
+      // Create job in Firestore
+      final jobData = {
+        'customerId': user.uid,
+        'customerName': customerName,
+        'customerPhone': user.phoneNumber ?? authService.userPhone ?? '',
+        'serviceCategory': _selectedCategory,
+        'serviceName': _selectedService,
+        'price': _selectedServicePrice,
+        'location': _selectedLocation,
+        'date': _selectedDate.toIso8601String(),
+        'time': _selectedTime,
+        'status': 'searching',  // searching → assigned → enRoute → completed
+        'paymentStatus': 'pending',  // pending → paid
+        'createdAt': FieldValue.serverTimestamp(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      };
+
+      // Save to Firestore
+      final docRef = await FirebaseFirestore.instance
+          .collection('jobs')
+          .add(jobData);
+
+      print('✅ Job created with ID: ${docRef.id}');
+      print('   Customer: $customerName (${user.uid})');
+      print('   Service: $_selectedService');
+      print('   Price: ₦${NumberFormat('#,###').format(_selectedServicePrice)}');
+
+      // Navigate to matching screen (finding nearby washer/cleaner)
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => MatchingScreen(
+              jobId: docRef.id,
+              serviceCategory: _selectedCategory,
+              serviceName: _selectedService,
+              price: _selectedServicePrice,
+              location: _selectedLocation,
+            ),
           ),
         );
-      },
-    );
-  }
-
-  void _proceedToPayment() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => PaymentScreen(
-          serviceName: _selectedService,
-          amount: _selectedServicePrice,
-          location: _selectedLocation,
-          date: _selectedDate,
-          time: _selectedTime,
-          paymentMethod: _selectedPaymentMethod,
-        ),
-      ),
-    );
+      }
+    } catch (e) {
+      print('❌ Error creating job: $e');
+      
+      // Show user-friendly error message
+      String errorMessage = 'Error: $e';
+      if (e.toString().contains('Please login')) {
+        errorMessage = 'Please login to book a service';
+        
+        // Offer to navigate to login
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(errorMessage),
+              backgroundColor: AppColors.error,
+              action: SnackBarAction(
+                label: 'Login',
+                textColor: Colors.white,
+                onPressed: () {
+                  Navigator.pushNamed(context, '/login');
+                },
+              ),
+            ),
+          );
+        }
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(errorMessage),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isBooking = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    // Get auth state
+    final authService = Provider.of<AuthService>(context);
+    final isLoggedIn = authService.isLoggedIn;
     final serviceDetails = _currentServiceDetails;
     final servicePrice = serviceDetails['price'] ?? 0;
     final serviceDuration = serviceDetails['duration'] ?? '30 mins';
@@ -275,9 +333,11 @@ class _BookingScreenState extends State<BookingScreen> {
     return Scaffold(
       backgroundColor: AppColors.white,
       appBar: AppBar(
-        title: const Text(
-          'Booking Details',
-          style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold),
+        title: Text(
+          _selectedCategory == 'Car Wash' ? 'Book Car Wash' :
+          _selectedCategory == 'House Cleaning' ? 'Book House Cleaning' :
+          'Book Laundry',
+          style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold),
         ),
         backgroundColor: AppColors.white,
         elevation: 0,
@@ -286,6 +346,35 @@ class _BookingScreenState extends State<BookingScreen> {
           icon: const Icon(Icons.arrow_back, color: AppColors.primary),
           onPressed: () => Navigator.pop(context),
         ),
+        actions: [
+          // Show login status indicator
+          Container(
+            margin: const EdgeInsets.only(right: 16),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: isLoggedIn ? Colors.green.withOpacity(0.1) : Colors.red.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  isLoggedIn ? Icons.check_circle : Icons.warning,
+                  color: isLoggedIn ? Colors.green : Colors.red,
+                  size: 16,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  isLoggedIn ? 'Logged In' : 'Not Logged In',
+                  style: TextStyle(
+                    color: isLoggedIn ? Colors.green : Colors.red,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -327,6 +416,41 @@ class _BookingScreenState extends State<BookingScreen> {
               }).toList(),
             ),
           ),
+
+          // ============================================================
+          // FIX 2: Show warning banner if not logged in
+          // ============================================================
+          if (!isLoggedIn)
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.warning_amber, color: Colors.red),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: const Text(
+                      'Please login to book a service',
+                      style: TextStyle(color: Colors.red),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pushNamed(context, '/login');
+                    },
+                    child: const Text(
+                      'Login',
+                      style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ),
+            ),
 
           Expanded(
             child: SingleChildScrollView(
@@ -527,8 +651,7 @@ class _BookingScreenState extends State<BookingScreen> {
 
                   const SizedBox(height: 20),
 
-                  // Payment Method - Green
-                  _buildSectionTitle('Payment Method'),
+                  // Payment Info - Note: Payment After Service
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
@@ -538,25 +661,12 @@ class _BookingScreenState extends State<BookingScreen> {
                     ),
                     child: Row(
                       children: [
-                        Icon(
-                          _selectedPaymentMethod == 'Wallet' ? Icons.wallet :
-                          _selectedPaymentMethod == 'Card' ? Icons.credit_card :
-                          _selectedPaymentMethod == 'Bank Transfer' ? Icons.account_balance :
-                          Icons.payments,
-                          color: AppColors.primary,
-                        ),
+                        const Icon(Icons.info_outline, color: AppColors.primary),
                         const SizedBox(width: 12),
                         Expanded(
-                          child: Text(
-                            _selectedPaymentMethod,
-                            style: const TextStyle(fontWeight: FontWeight.w500),
-                          ),
-                        ),
-                        TextButton(
-                          onPressed: _showPaymentPicker,
                           child: const Text(
-                            'Change',
-                            style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.w600),
+                            '💳 Payment will be made after service completion',
+                            style: TextStyle(fontSize: 14),
                           ),
                         ),
                       ],
@@ -565,25 +675,67 @@ class _BookingScreenState extends State<BookingScreen> {
 
                   const SizedBox(height: 32),
 
-                  // Continue Button - Green
+                  // ============================================================
+                  // FIX 3: BOOK BUTTON - Disabled if not logged in
+                  // ============================================================
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: _proceedToPayment,
+                      onPressed: _isBooking || !isLoggedIn ? null : _bookService,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.primary,
+                        backgroundColor: isLoggedIn ? AppColors.primary : Colors.grey,
                         foregroundColor: AppColors.white,
                         padding: const EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                      child: const Text(
-                        'Proceed to Payment',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                      ),
+                      child: _isBooking
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                              ),
+                            )
+                          : Text(
+                              !isLoggedIn ? 'Please Login to Book' : _actionButtonText,
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                     ),
                   ),
+
+                  // ============================================================
+                  // FIX 4: Login button shown if not logged in
+                  // ============================================================
+                  if (!isLoggedIn)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton(
+                          onPressed: () {
+                            Navigator.pushNamed(context, '/login');
+                          },
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppColors.primary,
+                            side: BorderSide(color: AppColors.primary),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          child: const Text(
+                            'Go to Login',
+                            style: TextStyle(fontSize: 16),
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
