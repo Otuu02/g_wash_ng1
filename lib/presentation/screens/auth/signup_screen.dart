@@ -61,11 +61,10 @@ class _SignupScreenState extends State<SignupScreen> {
           duration: Duration(seconds: 2),
         ),
       );
-      // Fixed: No 'const' keyword needed here
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const HomeScreen()),
-      );
+      final routeName = (authService.isServiceProvider || authService.isWasher)
+          ? '/washer-dashboard'
+          : '/home';
+      Navigator.pushNamedAndRemoveUntil(context, routeName, (route) => false);
     } else {
       _showError('Phone number already exists. Please login instead.');
     }

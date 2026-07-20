@@ -1,9 +1,10 @@
 // lib/presentation/screens/washer/matching_screen.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../../core/constants/app_colors.dart';
+import '../../../services/job_service.dart';
+import '../../../services/location_service.dart';
 import '../customer/tracking_screen.dart';
 
 class MatchingScreen extends StatefulWidget {
@@ -42,40 +43,21 @@ class _MatchingScreenState extends State<MatchingScreen> {
     setState(() => _isSearching = true);
 
     try {
-      // Fetch washers from Firestore
-      final snapshot = await FirebaseFirestore.instance
-          .collection('washers')
-          .where('approved', isEqualTo: true)
-          .where('isOnline', isEqualTo: true)
-          .get();
-
-      if (snapshot.docs.isEmpty) {
-        setState(() {
-          _isSearching = false;
-          _washers = [];
-        });
-        return;
+      double userLat = 6.5244;
+      double userLng = 3.3792;
+      try {
+        final loc = await LocationService().getCurrentLocation();
+        userLat = loc.latitude;
+        userLng = loc.longitude;
+      } catch (_) {
+        // Fallback to default Lagos coordinates
       }
 
-      // Convert to list with random distances (in real app, use geolocation)
-      final List<Map<String, dynamic>> fetchedWashers = [];
-      for (var doc in snapshot.docs) {
-        final data = doc.data();
-        final randomDistance = (2 + (4 * DateTime.now().millisecondsSinceEpoch % 10) / 10).toStringAsFixed(1);
-        final randomEta = (10 + (DateTime.now().millisecondsSinceEpoch % 20)).toString();
-        
-        fetchedWashers.add({
-          'id': doc.id,
-          'name': data['name'] ?? 'Unknown',
-          'phone': data['phone'] ?? 'No phone',
-          'city': data['city'] ?? 'No city',
-          'rating': data['rating'] ?? 4.5,
-          'distance': '$randomDistance km',
-          'eta': '$randomEta mins',
-          'isOnline': data['isOnline'] ?? false,
-          'approved': data['approved'] ?? false,
-        });
-      }
+      final fetchedWashers = await JobService().getProvidersByCategory(
+        category: widget.serviceCategory,
+        userLat: userLat,
+        userLng: userLng,
+      );
 
       setState(() {
         _washers = fetchedWashers;
@@ -83,13 +65,15 @@ class _MatchingScreenState extends State<MatchingScreen> {
       });
     } catch (e) {
       print('❌ Error finding washers: $e');
-      setState(() => _isSearching = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error finding washers: $e'),
-          backgroundColor: AppColors.error,
-        ),
-      );
+      if (mounted) {
+        setState(() => _isSearching = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error finding washers: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
     }
   }
 
@@ -311,57 +295,101 @@ class _MatchingScreenState extends State<MatchingScreen> {
                   itemBuilder: (context, index) {
                     final washer = _washers[index];
                     final isSelected = _selectedWasherId == washer['id'];
-                    return Card(
+                    final rawName = washer['name']?.toString() ?? 'Service Provider';
+                    final name = rawName.isNotEmpty ? rawName : 'Service Provider';
+                    final initial = name[0].toUpperCase();
+                    final rating = washer['rating']?.toString() ?? '4.8';
+                    final distance = washer['distance']?.toString() ?? '1.5 km';
+                    final eta = washer['eta']?.toString() ?? '10 mins';
+
+                    return Container(
                       margin: const EdgeInsets.only(bottom: 12),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: AppColors.primary.withOpacity(0.1),
-                          child: Text(
-                            washer['name'][0],
-                            style: const TextStyle(color: AppColors.primary),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: Colors.grey.shade200),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.03),
+                            blurRadius: 6,
+                            offset: const Offset(0, 2),
                           ),
-                        ),
-                        title: Text(washer['name']),
-                        subtitle: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
+                        ],
+                      ),
+                      child: Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 22,
+                            backgroundColor: AppColors.primary.withOpacity(0.15),
+                            child: Text(
+                              initial,
+                              style: const TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold, fontSize: 16),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Icon(Icons.star, color: Colors.amber, size: 14),
-                                Text(' ${washer['rating']}'),
-                                const SizedBox(width: 8),
-                                Text('📍 ${washer['distance']}'),
-                                const SizedBox(width: 8),
-                                Text('⏱ ${washer['eta']}'),
+                                Text(
+                                  name,
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 4),
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 4,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  children: [
+                                    Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(Icons.star, color: Colors.amber, size: 14),
+                                        Text(' $rating', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                                      ],
+                                    ),
+                                    Text('📍 $distance', style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+                                    Text('⏱ $eta', style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+                                  ],
+                                ),
                               ],
                             ),
-                          ],
-                        ),
-                        trailing: isSelected
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation<Color>(AppColors.primary),
-                                ),
-                              )
-                            : ElevatedButton(
-                                onPressed: _selectedWasherId == null
-                                    ? () => _assignWasher(washer)
-                                    : null,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: AppColors.primary,
-                                  foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(20),
+                          ),
+                          const SizedBox(width: 8),
+                          SizedBox(
+                            width: 75,
+                            height: 34,
+                            child: isSelected
+                                ? const Center(
+                                    child: SizedBox(
+                                      height: 18,
+                                      width: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        valueColor: AlwaysStoppedAnimation<Color>(AppColors.primary),
+                                      ),
+                                    ),
+                                  )
+                                : ElevatedButton(
+                                    onPressed: _selectedWasherId == null
+                                        ? () => _assignWasher(washer)
+                                        : null,
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: AppColors.primary,
+                                      foregroundColor: Colors.white,
+                                      padding: EdgeInsets.zero,
+                                      elevation: 0,
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(16),
+                                      ),
+                                    ),
+                                    child: const Text('Assign', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                                   ),
-                                ),
-                                child: const Text('Assign'),
-                              ),
+                          ),
+                        ],
                       ),
                     );
                   },

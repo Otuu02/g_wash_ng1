@@ -177,7 +177,7 @@ class OSMService {
       if (results.isNotEmpty) {
         states.add({
           'name': state,
-          'display_name': '${state} State, Nigeria',
+          'display_name': '$state State, Nigeria',
           'lat': results.first['lat'],
           'lon': results.first['lon'],
         });

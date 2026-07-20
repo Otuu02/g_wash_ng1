@@ -41,10 +41,12 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = false);
 
     if (success) {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (context) => const HomeScreen()),
-      );
+      final routeName = authService.isAdmin
+          ? '/admin'
+          : (authService.isServiceProvider || authService.isWasher)
+              ? '/washer-dashboard'
+              : '/home';
+      Navigator.pushNamedAndRemoveUntil(context, routeName, (route) => false);
     } else {
       _showError('Invalid phone number or password. Use 123456 as password.');
     }

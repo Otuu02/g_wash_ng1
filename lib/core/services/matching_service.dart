@@ -2,6 +2,7 @@
 // PURPOSE: Find and assign nearby washers to jobs using Firebase
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:math';
 
 class MatchingService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -348,11 +349,11 @@ class MatchingService {
     double dLon = _toRadians(lon2 - lon1);
 
     double a = 
-        (dLat / 2).sin() * (dLat / 2).sin() +
-        _toRadians(lat1).cos() * _toRadians(lat2).cos() *
-        (dLon / 2).sin() * (dLon / 2).sin();
+        sin(dLat / 2) * sin(dLat / 2) +
+        cos(_toRadians(lat1)) * cos(_toRadians(lat2)) *
+        sin(dLon / 2) * sin(dLon / 2);
 
-    double c = 2 * a.sqrt().atan2((1 - a).sqrt());
+    double c = 2 * atan2(sqrt(a), sqrt(1 - a));
 
     return earthRadius * c;
   }

@@ -1,11 +1,11 @@
-// lib/presentation/screens/customer/tracking_screen.dart
+import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:intl/intl.dart';
 import '../../../core/constants/app_colors.dart';
-import '../../../core/services/payment_service.dart';
+import '../../../services/location_service.dart';
 import '../customer/rating_screen.dart';
 
 class TrackingScreen extends StatefulWidget {
@@ -38,16 +38,36 @@ class _TrackingScreenState extends State<TrackingScreen> {
   String? _washerId;
   String _currentLocation = 'En route to your location';
   int _etaMinutes = 15;
+  double _distanceKm = 1.5;
   bool _isProcessing = false;
+
+  GoogleMapController? _mapController;
+  late LatLng _clientLocation;
+  late LatLng _providerLocation;
+  StreamSubscription? _jobSubscription;
+  StreamSubscription? _washerSubscription;
 
   @override
   void initState() {
     super.initState();
+    _clientLocation = widget.pickupLocation;
+    _providerLocation = LatLng(
+      widget.pickupLocation.latitude + 0.008,
+      widget.pickupLocation.longitude + 0.008,
+    );
     _listenToJobUpdates();
   }
 
+  @override
+  void dispose() {
+    _jobSubscription?.cancel();
+    _washerSubscription?.cancel();
+    _mapController?.dispose();
+    super.dispose();
+  }
+
   void _listenToJobUpdates() {
-    FirebaseFirestore.instance
+    _jobSubscription = FirebaseFirestore.instance
         .collection('jobs')
         .doc(widget.jobId)
         .snapshots()
@@ -55,27 +75,28 @@ class _TrackingScreenState extends State<TrackingScreen> {
       if (snapshot.exists) {
         final data = snapshot.data()!;
         final status = data['status'] ?? 'assigned';
+        _washerId = data['washerId'] ?? data['assignedWasherId'];
+        
+        if (_washerId != null && _washerId!.isNotEmpty && _washerSubscription == null) {
+          _listenToWasherLocation(_washerId!);
+        }
         
         setState(() {
           _jobStatus = status;
           _isLoading = false;
           
-          // Update step based on status
           switch (status) {
             case 'assigned':
               _currentStep = 1;
-              _currentLocation = 'Washer is on the way';
-              _etaMinutes = 15;
+              _currentLocation = 'Washer assigned & on the way';
               break;
             case 'accepted':
               _currentStep = 1;
-              _currentLocation = 'Washer has accepted your request';
-              _etaMinutes = 15;
+              _currentLocation = 'Washer accepted your request';
               break;
             case 'enRoute':
               _currentStep = 1;
               _currentLocation = 'Washer is en route to your location';
-              _etaMinutes = 10;
               break;
             case 'arrived':
               _currentStep = 2;
@@ -94,6 +115,37 @@ class _TrackingScreenState extends State<TrackingScreen> {
         });
       }
     });
+  }
+
+  void _listenToWasherLocation(String washerId) {
+    _washerSubscription = LocationService().getWasherLocationStream(washerId).listen((doc) {
+      if (doc.exists && doc.data() != null) {
+        final data = doc.data()!;
+        final lat = (data['currentLat'] ?? data['latitude'] ?? (_clientLocation.latitude + 0.005)) as double;
+        final lng = (data['currentLng'] ?? data['longitude'] ?? (_clientLocation.longitude + 0.005)) as double;
+        final newProviderLoc = LatLng(lat, lng);
+        
+        final dist = _calculateDistance(_clientLocation.latitude, _clientLocation.longitude, lat, lng);
+        final eta = (dist * 4).round().clamp(1, 45);
+
+        setState(() {
+          _providerLocation = newProviderLoc;
+          _distanceKm = dist;
+          if (_currentStep < 2) {
+            _etaMinutes = eta;
+          }
+        });
+      }
+    });
+  }
+
+  double _calculateDistance(double lat1, double lon1, double lat2, double lon2) {
+    var p = 0.017453292519943295;
+    var c = cos;
+    var a = 0.5 - c((lat2 - lat1) * p) / 2 +
+        c(lat1 * p) * c(lat2 * p) *
+            (1 - c((lon2 - lon1) * p)) / 2;
+    return 12742 * asin(sqrt(a));
   }
 
   Future<void> _cancelJob() async {
@@ -349,38 +401,96 @@ class _TrackingScreenState extends State<TrackingScreen> {
           // Map View
           Expanded(
             flex: 2,
-            child: Container(
-              color: AppColors.grey100,
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(Icons.map, size: 80, color: Colors.grey),
-                    const SizedBox(height: 8),
-                    const Text(
-                      'Live Map View',
-                      style: TextStyle(color: Colors.grey),
+            child: Stack(
+              children: [
+                GoogleMap(
+                  initialCameraPosition: CameraPosition(
+                    target: _clientLocation,
+                    zoom: 14.5,
+                  ),
+                  markers: {
+                    Marker(
+                      markerId: const MarkerId('client'),
+                      position: _clientLocation,
+                      infoWindow: InfoWindow(title: 'Client Location', snippet: widget.pickupAddress),
+                      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
                     ),
-                    Text(
-                      'Washer: ${widget.washerName}',
-                      style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    Marker(
+                      markerId: const MarkerId('provider'),
+                      position: _providerLocation,
+                      infoWindow: InfoWindow(title: 'Washer: ${widget.washerName}', snippet: '${_distanceKm.toStringAsFixed(1)} km away'),
+                      icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
                     ),
-                    Text(
-                      'Pickup: ${widget.pickupAddress}',
-                      style: const TextStyle(fontSize: 11, color: Colors.grey),
-                      textAlign: TextAlign.center,
+                  },
+                  polylines: {
+                    Polyline(
+                      polylineId: const PolylineId('route'),
+                      points: [_providerLocation, _clientLocation],
+                      color: AppColors.primary,
+                      width: 4,
                     ),
-                    if (isCancelled)
-                      const Padding(
-                        padding: EdgeInsets.only(top: 8),
-                        child: Text(
-                          '❌ This job has been cancelled',
-                          style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                  ],
+                  },
+                  onMapCreated: (controller) => _mapController = controller,
+                  myLocationEnabled: true,
+                  myLocationButtonEnabled: true,
                 ),
-              ),
+                Positioned(
+                  top: 12,
+                  left: 16,
+                  right: 16,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(30),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.12),
+                          blurRadius: 8,
+                          offset: const Offset(0, 3),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              width: 10,
+                              height: 10,
+                              decoration: const BoxDecoration(
+                                color: AppColors.primary,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              '${_distanceKm.toStringAsFixed(1)} km away',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                            ),
+                          ],
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: AppColors.primary.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            'ETA: $_etaMinutes mins',
+                            style: const TextStyle(
+                              color: AppColors.primary,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
           

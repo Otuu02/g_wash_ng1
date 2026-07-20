@@ -1,12 +1,14 @@
-// lib/presentation/screens/customer/booking_screen.dart
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:provider/provider.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../services/auth_service.dart';
+import '../../../services/job_service.dart';
 import '../washer/matching_screen.dart';
+import 'tracking_screen.dart';
 
 class BookingScreen extends StatefulWidget {
   final String? selectedService;
@@ -215,66 +217,37 @@ class _BookingScreenState extends State<BookingScreen> {
     setState(() => _isBooking = true);
 
     try {
-      // Get AuthService from provider
       final authService = Provider.of<AuthService>(context, listen: false);
-      
-      // Check if user is logged in
       if (!authService.isLoggedIn) {
         throw Exception('Please login to book a service');
       }
 
-      // Get current user from Firebase Auth
       final user = FirebaseAuth.instance.currentUser;
-      
-      if (user == null) {
-        throw Exception('Please login to book a service');
-      }
-
-      // Get user data from Firestore
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-      
-      // FIXED: Properly handle null data
-      final customerName = userDoc.exists 
-          ? (userDoc.data()?['name'] ?? 'Customer') 
-          : 'Customer';
+      final uid = user?.uid ?? authService.userId ?? 'demo_user';
+      final customerName = authService.userName ?? 'Customer';
 
       // Create job in Firestore
-      final jobData = {
-        'customerId': user.uid,
-        'customerName': customerName,
-        'customerPhone': user.phoneNumber ?? authService.userPhone ?? '',
-        'serviceCategory': _selectedCategory,
-        'serviceName': _selectedService,
-        'price': _selectedServicePrice,
-        'location': _selectedLocation,
-        'date': _selectedDate.toIso8601String(),
-        'time': _selectedTime,
-        'status': 'searching',  // searching → assigned → enRoute → completed
-        'paymentStatus': 'pending',  // pending → paid
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      };
+      final result = await JobService().createJob(
+        customerId: uid,
+        customerName: customerName,
+        serviceCategory: _selectedCategory,
+        serviceName: _selectedService,
+        price: _selectedServicePrice,
+        location: _selectedLocation,
+        latitude: 6.5244,
+        longitude: 3.3792,
+        scheduledDate: _selectedDate,
+        scheduledTime: _selectedTime,
+      );
 
-      // Save to Firestore
-      final docRef = await FirebaseFirestore.instance
-          .collection('jobs')
-          .add(jobData);
+      final jobId = result['id'];
 
-      print('✅ Job created with ID: ${docRef.id}');
-      print('   Customer: $customerName (${user.uid})');
-      print('   Service: $_selectedService');
-      print('   Price: ₦${NumberFormat('#,###').format(_selectedServicePrice)}');
-
-      // Navigate to matching screen (finding nearby washer/cleaner)
       if (mounted) {
-        Navigator.pushReplacement(
+        Navigator.push(
           context,
           MaterialPageRoute(
             builder: (context) => MatchingScreen(
-              jobId: docRef.id,
+              jobId: jobId,
               serviceCategory: _selectedCategory,
               serviceName: _selectedService,
               price: _selectedServicePrice,
@@ -285,32 +258,238 @@ class _BookingScreenState extends State<BookingScreen> {
       }
     } catch (e) {
       print('❌ Error creating job: $e');
-      
-      // Show user-friendly error message
-      String errorMessage = 'Error: $e';
-      if (e.toString().contains('Please login')) {
-        errorMessage = 'Please login to book a service';
-        
-        // Offer to navigate to login
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(errorMessage),
-              backgroundColor: AppColors.error,
-              action: SnackBarAction(
-                label: 'Login',
-                textColor: Colors.white,
-                onPressed: () {
-                  Navigator.pushNamed(context, '/login');
-                },
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error booking service: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isBooking = false);
+    }
+  }
+
+  void _showProviderSelectionModal() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) {
+        return Container(
+          height: MediaQuery.of(context).size.height * 0.75,
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[300],
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Select Service Provider',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Choose who should handle your $_selectedCategory in $_selectedLocation',
+                style: const TextStyle(fontSize: 13, color: AppColors.grey600),
+              ),
+              const SizedBox(height: 16),
+              // Option for Auto-Assign
+              Card(
+                elevation: 0,
+                color: AppColors.primary.withOpacity(0.08),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  side: const BorderSide(color: AppColors.primary, width: 1.5),
+                ),
+                child: ListTile(
+                  leading: const CircleAvatar(
+                    backgroundColor: AppColors.primary,
+                    child: Icon(Icons.flash_on, color: Colors.white),
+                  ),
+                  title: const Text('Auto-Assign Nearest Provider', style: TextStyle(fontWeight: FontWeight.bold)),
+                  subtitle: const Text('Fastest match based on GPS location & ETA'),
+                  trailing: const Icon(Icons.arrow_forward_ios, size: 16, color: AppColors.primary),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _createBookingWithProvider(null, null);
+                  },
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text('Available Nearby Providers', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              Expanded(
+                child: FutureBuilder<List<Map<String, dynamic>>>(
+                  future: JobService().getProvidersByCategory(
+                    category: _selectedCategory,
+                    userLat: 6.5244,
+                    userLng: 3.3792,
+                  ),
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    final providers = snapshot.data ?? [];
+                    if (providers.isEmpty) {
+                      return Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.person_off, size: 48, color: Colors.grey[400]),
+                            const SizedBox(height: 8),
+                            const Text('No specific providers listed nearby right now.'),
+                            const SizedBox(height: 4),
+                            ElevatedButton.icon(
+                              onPressed: () {
+                                Navigator.pop(context);
+                                _createBookingWithProvider(null, null);
+                              },
+                              icon: const Icon(Icons.flash_on),
+                              label: const Text('Proceed with Auto-Assign'),
+                            ),
+                          ],
+                        ),
+                      );
+                    }
+
+                    return ListView.builder(
+                      itemCount: providers.length,
+                      itemBuilder: (context, index) {
+                        final provider = providers[index];
+                        final name = provider['name'] ?? provider['fullName'] ?? 'G-Wash Provider';
+                        final vehicle = provider['vehicleType'] ?? 'Motorcycle';
+                        final rating = (provider['rating'] ?? 4.9).toString();
+                        final distance = provider['distanceDisplay'] ?? '2.0 km';
+                        final providerId = provider['id'] ?? provider['userId'];
+
+                        return Card(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            side: BorderSide(color: Colors.grey.shade200),
+                          ),
+                          child: ListTile(
+                            leading: CircleAvatar(
+                              backgroundColor: AppColors.primary.withOpacity(0.15),
+                              child: const Icon(Icons.person, color: AppColors.primary),
+                            ),
+                            title: Text(name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                            subtitle: Text('$vehicle • $distance away'),
+                            trailing: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.star, size: 16, color: Colors.amber),
+                                    const SizedBox(width: 4),
+                                    Text(rating, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                const Text('Select', style: TextStyle(color: AppColors.primary, fontWeight: FontWeight.bold, fontSize: 12)),
+                              ],
+                            ),
+                            onTap: () {
+                              Navigator.pop(context);
+                              _createBookingWithProvider(providerId, name);
+                            },
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _createBookingWithProvider(String? providerId, String? providerName) async {
+    setState(() => _isBooking = true);
+
+    try {
+      final authService = Provider.of<AuthService>(context, listen: false);
+      if (!authService.isLoggedIn) {
+        throw Exception('Please login to book a service');
+      }
+
+      final user = FirebaseAuth.instance.currentUser;
+      final uid = user?.uid ?? authService.userId ?? 'demo_user';
+      final customerName = authService.userName ?? 'Customer';
+
+      final result = await JobService().createJob(
+        customerId: uid,
+        customerName: customerName,
+        serviceCategory: _selectedCategory,
+        serviceName: _selectedService,
+        price: _selectedServicePrice,
+        location: _selectedLocation,
+        latitude: 6.5244,
+        longitude: 3.3792,
+        scheduledDate: _selectedDate,
+        scheduledTime: _selectedTime,
+        assignedWasherId: providerId,
+        assignedWasherName: providerName,
+      );
+
+      final jobId = result['id'];
+
+      if (mounted) {
+        if (providerId != null && providerId.isNotEmpty) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => TrackingScreen(
+                jobId: jobId,
+                washerName: providerName ?? 'Washer',
+                pickupAddress: _selectedLocation,
+                pickupLocation: const LatLng(6.5244, 3.3792),
+                serviceName: _selectedService,
+                price: _selectedServicePrice,
+              ),
+            ),
+          );
+        } else {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => MatchingScreen(
+                jobId: jobId,
+                serviceCategory: _selectedCategory,
+                serviceName: _selectedService,
+                price: _selectedServicePrice,
+                location: _selectedLocation,
               ),
             ),
           );
         }
-      } else {
+      }
+    } catch (e) {
+      print('❌ Error creating job: $e');
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(errorMessage),
+            content: Text('Error booking service: $e'),
             backgroundColor: AppColors.error,
           ),
         );

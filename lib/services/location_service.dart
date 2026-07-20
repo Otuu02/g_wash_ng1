@@ -128,6 +128,11 @@ class LocationService extends ChangeNotifier {
     );
   }
 
+  // Stream washer position from Firestore for live map updates
+  Stream<DocumentSnapshot<Map<String, dynamic>>> getWasherLocationStream(String washerId) {
+    return _firestore.collection('washers').doc(washerId).snapshots();
+  }
+
   // ==================== GOOGLE MAPS GEOCODING ====================
   
   Future<LatLng?> getCoordinatesFromAddress(String address) async {
@@ -349,7 +354,7 @@ class LocationService extends ChangeNotifier {
   
   static String formatDuration(int seconds) {
     if (seconds < 60) {
-      return '${seconds} sec';
+      return '$seconds sec';
     }
     final minutes = seconds ~/ 60;
     if (minutes < 60) {

@@ -327,11 +327,35 @@ class PermissionService {
   
   /// Check if device is running Android 13 or above
   static Future<bool> _isAndroid13OrAbove() async {
-    // Use Platform.isAndroid and version check
     if (Platform.isAndroid) {
-      // Android 13 is API level 33
-      // You can use device_info_plus to get exact version
-      return true; // For now, assume Android 13+
+      try {
+        final versionStr = Platform.operatingSystemVersion.toLowerCase();
+        
+        // Check for API level (e.g. "api 33", "sdk 33")
+        final apiMatch = RegExp(r'(api|sdk)\s*(\d+)').firstMatch(versionStr);
+        if (apiMatch != null) {
+          final sdkInt = int.parse(apiMatch.group(2)!);
+          return sdkInt >= 33;
+        }
+        
+        // Check for Android version (e.g. "android 13")
+        final androidMatch = RegExp(r'android\s*(\d+)').firstMatch(versionStr);
+        if (androidMatch != null) {
+          final ver = int.parse(androidMatch.group(1)!);
+          return ver >= 13;
+        }
+        
+        // Fallback: look for any number >= 33
+        final numberMatches = RegExp(r'\d+').allMatches(versionStr);
+        for (var match in numberMatches) {
+          final num = int.tryParse(match.group(0)!);
+          if (num != null && num >= 33 && num < 100) {
+            return true;
+          }
+        }
+      } catch (e) {
+        print('Error parsing OS version: $e');
+      }
     }
     return false;
   }
@@ -362,7 +386,7 @@ class PermissionService {
           ElevatedButton(
             onPressed: () {
               Navigator.pop(context);
-              // Request permission again
+              openAppSettings();
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF0CAF60),

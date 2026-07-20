@@ -90,6 +90,7 @@ class _WasherRegistrationScreenState extends State<WasherRegistrationScreen> {
         _nameController.text.trim(),
         _phoneController.text.trim(),
         _passwordController.text.trim(),
+        role: 'washer',
       );
 
       if (!signupSuccess) {

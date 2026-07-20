@@ -19,14 +19,14 @@ class AuthService extends ChangeNotifier {
   Map<String, Map<String, String>> _registeredUsers = {};
 
   AuthService() {
-    _loadSavedUser();
-    _listenToAuthChanges();
+    loadSavedUser();
+    listenToAuthChanges();
   }
 
   // ============================================================
   // Listen to Firebase Auth changes
   // ============================================================
-  void _listenToAuthChanges() {
+  void listenToAuthChanges() {
     FirebaseAuth.instance.authStateChanges().listen((User? user) async {
       if (user != null) {
         print('✅ Firebase Auth: User signed in: ${user.uid}');
@@ -111,7 +111,7 @@ class AuthService extends ChangeNotifier {
   bool get isAdmin => _userRole == 'admin';
   bool get isServiceProvider => isWasher || isCleaner || isLaundryProvider;
 
-  Future<void> _loadSavedUser() async {
+  Future<void> loadSavedUser() async {
     final prefs = await SharedPreferences.getInstance();
     _isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
     _userName = prefs.getString('userName');
@@ -145,14 +145,40 @@ class AuthService extends ChangeNotifier {
   }
 
   // ============================================================
+  // Standardized Phone Number Formatting & Validation for Nigeria
+  // ============================================================
+  String formatPhone(String phoneNumber) {
+    final cleaned = phoneNumber.replaceAll(RegExp(r'[^0-9]'), '');
+    if (cleaned.startsWith('234') && cleaned.length == 13) {
+      return '+$cleaned';
+    }
+    if (cleaned.startsWith('0') && cleaned.length == 11) {
+      return '+234${cleaned.substring(1)}';
+    }
+    if (cleaned.length == 10) {
+      return '+234$cleaned';
+    }
+    return phoneNumber.startsWith('+') ? phoneNumber : '+$phoneNumber';
+  }
+
+  bool isValidPhone(String phoneNumber) {
+    final cleaned = phoneNumber.replaceAll(RegExp(r'[^0-9]'), '');
+    return cleaned.length >= 10;
+  }
+
+  // ============================================================
   // SIGNUP - Creates user in Firebase Auth
   // ============================================================
-  Future<bool> signup(String name, String phoneNumber, String password) async {
+  Future<bool> signup(String name, String phoneNumber, String password, {String role = 'customer'}) async {
     try {
-      final cleaned = phoneNumber.replaceAll(RegExp(r'[^0-9]'), '');
-      final formattedPhone = cleaned.length == 10 ? '+234$cleaned' : phoneNumber;
+      final formattedPhone = formatPhone(phoneNumber);
       
-      if (name.isEmpty || cleaned.length < 10 || password.isEmpty) {
+      // Auto-assign admin role for admin phone 08000000000
+      if (formattedPhone == '+2348000000000') {
+        role = 'admin';
+      }
+      
+      if (name.isEmpty || !isValidPhone(phoneNumber) || password.isEmpty) {
         return false;
       }
       
@@ -160,7 +186,7 @@ class AuthService extends ChangeNotifier {
         return false;
       }
       
-      final email = '${formattedPhone.replaceAll('+', '')}@gwashng.com';
+      final email = '${formattedPhone.replaceAll(RegExp(r'[^0-9]'), '')}@gwashng.com';
       
       UserCredential userCredential = await FirebaseAuth.instance
           .createUserWithEmailAndPassword(
@@ -174,7 +200,7 @@ class AuthService extends ChangeNotifier {
         'name': name,
         'phone': formattedPhone,
         'email': email,
-        'role': 'customer',
+        'role': role,
         'isBlocked': false,
         'createdAt': FieldValue.serverTimestamp(),
       });
@@ -185,14 +211,14 @@ class AuthService extends ChangeNotifier {
         'password': password,
         'phone': formattedPhone,
         'userId': uid,
-        'role': 'customer',
+        'role': role,
       };
       
       _isLoggedIn = true;
       _userName = name;
       _userPhone = formattedPhone;
       _userId = uid;
-      _userRole = 'customer';
+      _userRole = role;
       _serviceCategory = null;
       await _saveUserState();
       notifyListeners();
@@ -217,15 +243,14 @@ class AuthService extends ChangeNotifier {
   // ============================================================
   Future<bool> login(String phoneNumber, String password) async {
     try {
-      final cleaned = phoneNumber.replaceAll(RegExp(r'[^0-9]'), '');
-      final formattedPhone = cleaned.length == 10 ? '+234$cleaned' : phoneNumber;
+      final formattedPhone = formatPhone(phoneNumber);
       
-      if (cleaned.length < 10) {
+      if (!isValidPhone(phoneNumber)) {
         print('❌ Invalid phone number: $formattedPhone');
         return false;
       }
       
-      final email = '${formattedPhone.replaceAll('+', '')}@gwashng.com';
+      final email = '${formattedPhone.replaceAll(RegExp(r'[^0-9]'), '')}@gwashng.com';
       
       // ============================================================
       // STEP 1: Check if user exists in Firestore FIRST
@@ -275,13 +300,14 @@ class AuthService extends ChangeNotifier {
           return true;
           
         } on FirebaseAuthException catch (e) {
-          print('❌ Firebase Auth error: ${e.message}');
+          print('❌ Firebase Auth error: ${e.message} (code: ${e.code})');
           
           // ============================================================
           // STEP 3: If user not found in Firebase Auth, CREATE them
+          // Supports user-not-found and invalid-credential
           // ============================================================
-          if (e.code == 'user-not-found') {
-            print('📝 User not in Firebase Auth - creating now...');
+          if (e.code == 'user-not-found' || e.code == 'invalid-credential') {
+            print('📝 User not found/invalid credentials in Firebase Auth - attempting to create account...');
             
             try {
               // Create the user in Firebase Auth
@@ -328,7 +354,12 @@ class AuthService extends ChangeNotifier {
               return true;
               
             } on FirebaseAuthException catch (createError) {
-              print('❌ Failed to create user in Firebase Auth: ${createError.message}');
+              print('❌ Failed to create user in Firebase Auth: ${createError.message} (code: ${createError.code})');
+              // If the email is already in use, it means they entered the wrong password!
+              if (createError.code == 'email-already-in-use') {
+                print('❌ Wrong password for existing user');
+                return false;
+              }
               return _localLogin(formattedPhone, password);
             }
           }
@@ -360,6 +391,20 @@ class AuthService extends ChangeNotifier {
   // LOCAL LOGIN - Fallback
   // ============================================================
   Future<bool> _localLogin(String formattedPhone, String password) async {
+    // Admin demo account override
+    if (formattedPhone == '+2348000000000' && password == '123456') {
+      _isLoggedIn = true;
+      _userName = 'G Wash Admin';
+      _userPhone = formattedPhone;
+      _userId = 'admin_demo_id';
+      _userRole = 'admin';
+      _serviceCategory = null;
+      await _saveUserState();
+      notifyListeners();
+      print('✅ Admin logged in: $_userName');
+      return true;
+    }
+
     // Check local storage
     if (_registeredUsers.containsKey(formattedPhone)) {
       if (_registeredUsers[formattedPhone]!['password'] == password) {
@@ -407,10 +452,9 @@ class AuthService extends ChangeNotifier {
   // DEMO LOGIN - Only for testing
   // ============================================================
   Future<bool> demoLogin(String phoneNumber) async {
-    final cleaned = phoneNumber.replaceAll(RegExp(r'[^0-9]'), '');
-    final formattedPhone = cleaned.length == 10 ? '+234$cleaned' : phoneNumber;
+    final formattedPhone = formatPhone(phoneNumber);
     
-    if (cleaned.length < 10) return false;
+    if (!isValidPhone(phoneNumber)) return false;
     
     _isLoggedIn = true;
     _userName = 'Demo User';
@@ -512,7 +556,7 @@ class AuthService extends ChangeNotifier {
     int successCount = 0;
     int failCount = 0;
     
-    await _loadSavedUser();
+    await loadSavedUser();
     
     for (var entry in _registeredUsers.entries) {
       final phone = entry.key;
@@ -856,7 +900,7 @@ class AuthService extends ChangeNotifier {
   }
 
   Future<void> syncAllUsersToFirestore() async {
-    await _loadSavedUser();
+    await loadSavedUser();
   }
   
   Future<String?> fetchUserRoleFromFirestore(String userId) async {

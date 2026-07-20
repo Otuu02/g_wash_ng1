@@ -70,10 +70,12 @@ class _OTPScreenState extends State<OTPScreen> {
       await authService.login(widget.phoneNumber, otp);
       
       if (authService.isLoggedIn && mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => const HomeScreen()),
-        );
+        final routeName = authService.isAdmin
+            ? '/admin'
+            : (authService.isServiceProvider || authService.isWasher)
+                ? '/washer-dashboard'
+                : '/home';
+        Navigator.pushNamedAndRemoveUntil(context, routeName, (route) => false);
       } else if (mounted) {
         setState(() {
           _errorMessage = 'Invalid verification code. Please try again.';

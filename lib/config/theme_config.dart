@@ -136,7 +136,7 @@ class ThemeConfig {
         BoxShadow(
           color: Colors.black.withOpacity(0.05),
           blurRadius: elevation * 2,
-          offset: const Offset(0, elevation),
+          offset: Offset(0, elevation),
         ),
       ],
     );
